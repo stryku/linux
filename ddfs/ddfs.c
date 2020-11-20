@@ -290,28 +290,547 @@ static int ddfs_show_options(struct seq_file *m, struct dentry *root)
 	return 0;
 }
 
+static struct dentry *ddfs_fh_to_dentry(struct super_block *sb, struct fid *fid,
+					int fh_len, int fh_type)
+{
+	return generic_fh_to_dentry(sb, fid, fh_len, fh_type,
+				    fat_nfs_get_inode);
+}
+
+static struct dentry *ddfs_fh_to_parent(struct super_block *sb, struct fid *fid,
+					int fh_len, int fh_type)
+{
+	return generic_fh_to_parent(sb, fid, fh_len, fh_type,
+				    fat_nfs_get_inode);
+}
+
+static struct dentry *ddfs_get_parent(struct dentry *child_dir)
+{
+	struct super_block *sb = child_dir->d_sb;
+	struct buffer_head *bh = NULL;
+	struct msdos_dir_entry *de;
+	struct inode *parent_inode = NULL;
+	struct msdos_sb_info *sbi = MSDOS_SB(sb);
+
+	if (!fat_get_dotdot_entry(d_inode(child_dir), &bh, &de)) {
+		int parent_logstart = fat_get_start(sbi, de);
+		parent_inode = fat_dget(sb, parent_logstart);
+		if (!parent_inode && sbi->options.nfs == FAT_NFS_NOSTALE_RO)
+			parent_inode = fat_rebuild_parent(sb, parent_logstart);
+	}
+	brelse(bh);
+
+	return d_obtain_alias(parent_inode);
+}
+
 const struct export_operations fat_export_ops = {
-	.fh_to_dentry = fat_fh_to_dentry,
-	.fh_to_parent = fat_fh_to_parent,
-	.get_parent = fat_get_parent,
+	.fh_to_dentry = ddfs_fh_to_dentry,
+	.fh_to_parent = ddfs_fh_to_parent,
+	.get_parent = ddfs_get_parent,
 };
+
+static int ddfs_create(struct inode *dir, struct dentry *dentry, umode_t mode,
+		       bool excl)
+{
+	struct super_block *sb = dir->i_sb;
+	struct inode *inode;
+	struct fat_slot_info sinfo;
+	struct timespec64 ts;
+	int err;
+
+	mutex_lock(&MSDOS_SB(sb)->s_lock);
+
+	ts = current_time(dir);
+	err = vfat_add_entry(dir, &dentry->d_name, 0, 0, &ts, &sinfo);
+	if (err)
+		goto out;
+	inode_inc_iversion(dir);
+
+	inode = fat_build_inode(sb, sinfo.de, sinfo.i_pos);
+	brelse(sinfo.bh);
+	if (IS_ERR(inode)) {
+		err = PTR_ERR(inode);
+		goto out;
+	}
+	inode_inc_iversion(inode);
+	fat_truncate_time(inode, &ts, S_ATIME | S_CTIME | S_MTIME);
+	/* timestamp is already written, so mark_inode_dirty() is unneeded. */
+
+	d_instantiate(dentry, inode);
+out:
+	mutex_unlock(&MSDOS_SB(sb)->s_lock);
+	return err;
+}
+
+static struct dentry *ddfs_lookup(struct inode *dir, struct dentry *dentry,
+				  unsigned int flags)
+{
+	struct super_block *sb = dir->i_sb;
+	struct fat_slot_info sinfo;
+	struct inode *inode;
+	struct dentry *alias;
+	int err;
+
+	mutex_lock(&MSDOS_SB(sb)->s_lock);
+
+	err = vfat_find(dir, &dentry->d_name, &sinfo);
+	if (err) {
+		if (err == -ENOENT) {
+			inode = NULL;
+			goto out;
+		}
+		goto error;
+	}
+
+	inode = fat_build_inode(sb, sinfo.de, sinfo.i_pos);
+	brelse(sinfo.bh);
+	if (IS_ERR(inode)) {
+		err = PTR_ERR(inode);
+		goto error;
+	}
+
+	alias = d_find_alias(inode);
+	/*
+	 * Checking "alias->d_parent == dentry->d_parent" to make sure
+	 * FS is not corrupted (especially double linked dir).
+	 */
+	if (alias && alias->d_parent == dentry->d_parent) {
+		/*
+		 * This inode has non anonymous-DCACHE_DISCONNECTED
+		 * dentry. This means, the user did ->lookup() by an
+		 * another name (longname vs 8.3 alias of it) in past.
+		 *
+		 * Switch to new one for reason of locality if possible.
+		 */
+		if (!S_ISDIR(inode->i_mode))
+			d_move(alias, dentry);
+		iput(inode);
+		mutex_unlock(&MSDOS_SB(sb)->s_lock);
+		return alias;
+	} else
+		dput(alias);
+
+out:
+	mutex_unlock(&MSDOS_SB(sb)->s_lock);
+	if (!inode)
+		vfat_d_version_set(dentry, inode_query_iversion(dir));
+	return d_splice_alias(inode, dentry);
+error:
+	mutex_unlock(&MSDOS_SB(sb)->s_lock);
+	return ERR_PTR(err);
+}
+
+static int ddfs_unlink(struct inode *dir, struct dentry *dentry)
+{
+	struct inode *inode = d_inode(dentry);
+	struct super_block *sb = dir->i_sb;
+	struct fat_slot_info sinfo;
+	int err;
+
+	mutex_lock(&MSDOS_SB(sb)->s_lock);
+
+	err = vfat_find(dir, &dentry->d_name, &sinfo);
+	if (err)
+		goto out;
+
+	err = fat_remove_entries(dir, &sinfo); /* and releases bh */
+	if (err)
+		goto out;
+	clear_nlink(inode);
+	fat_truncate_time(inode, NULL, S_ATIME | S_MTIME);
+	fat_detach(inode);
+	vfat_d_version_set(dentry, inode_query_iversion(dir));
+out:
+	mutex_unlock(&MSDOS_SB(sb)->s_lock);
+
+	return err;
+}
+
+static int ddfs_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
+{
+	struct super_block *sb = dir->i_sb;
+	struct inode *inode;
+	struct fat_slot_info sinfo;
+	struct timespec64 ts;
+	int err, cluster;
+
+	mutex_lock(&MSDOS_SB(sb)->s_lock);
+
+	ts = current_time(dir);
+	cluster = fat_alloc_new_dir(dir, &ts);
+	if (cluster < 0) {
+		err = cluster;
+		goto out;
+	}
+	err = vfat_add_entry(dir, &dentry->d_name, 1, cluster, &ts, &sinfo);
+	if (err)
+		goto out_free;
+	inode_inc_iversion(dir);
+	inc_nlink(dir);
+
+	inode = fat_build_inode(sb, sinfo.de, sinfo.i_pos);
+	brelse(sinfo.bh);
+	if (IS_ERR(inode)) {
+		err = PTR_ERR(inode);
+		/* the directory was completed, just return a error */
+		goto out;
+	}
+	inode_inc_iversion(inode);
+	set_nlink(inode, 2);
+	fat_truncate_time(inode, &ts, S_ATIME | S_CTIME | S_MTIME);
+	/* timestamp is already written, so mark_inode_dirty() is unneeded. */
+
+	d_instantiate(dentry, inode);
+
+	mutex_unlock(&MSDOS_SB(sb)->s_lock);
+	return 0;
+
+out_free:
+	fat_free_clusters(dir, cluster);
+out:
+	mutex_unlock(&MSDOS_SB(sb)->s_lock);
+	return err;
+}
+
+static int ddfs_rmdir(struct inode *dir, struct dentry *dentry)
+{
+	struct inode *inode = d_inode(dentry);
+	struct super_block *sb = dir->i_sb;
+	struct fat_slot_info sinfo;
+	int err;
+
+	mutex_lock(&MSDOS_SB(sb)->s_lock);
+
+	err = fat_dir_empty(inode);
+	if (err)
+		goto out;
+	err = vfat_find(dir, &dentry->d_name, &sinfo);
+	if (err)
+		goto out;
+
+	err = fat_remove_entries(dir, &sinfo); /* and releases bh */
+	if (err)
+		goto out;
+	drop_nlink(dir);
+
+	clear_nlink(inode);
+	fat_truncate_time(inode, NULL, S_ATIME | S_MTIME);
+	fat_detach(inode);
+	vfat_d_version_set(dentry, inode_query_iversion(dir));
+out:
+	mutex_unlock(&MSDOS_SB(sb)->s_lock);
+
+	return err;
+}
+
+static int ddfs_rename(struct inode *old_dir, struct dentry *old_dentry,
+		       struct inode *new_dir, struct dentry *new_dentry,
+		       unsigned int flags)
+{
+	struct buffer_head *dotdot_bh;
+	struct msdos_dir_entry *dotdot_de;
+	struct inode *old_inode, *new_inode;
+	struct fat_slot_info old_sinfo, sinfo;
+	struct timespec64 ts;
+	loff_t new_i_pos;
+	int err, is_dir, update_dotdot, corrupt = 0;
+	struct super_block *sb = old_dir->i_sb;
+
+	if (flags & ~RENAME_NOREPLACE)
+		return -EINVAL;
+
+	old_sinfo.bh = sinfo.bh = dotdot_bh = NULL;
+	old_inode = d_inode(old_dentry);
+	new_inode = d_inode(new_dentry);
+	mutex_lock(&MSDOS_SB(sb)->s_lock);
+	err = vfat_find(old_dir, &old_dentry->d_name, &old_sinfo);
+	if (err)
+		goto out;
+
+	is_dir = S_ISDIR(old_inode->i_mode);
+	update_dotdot = (is_dir && old_dir != new_dir);
+	if (update_dotdot) {
+		if (fat_get_dotdot_entry(old_inode, &dotdot_bh, &dotdot_de)) {
+			err = -EIO;
+			goto out;
+		}
+	}
+
+	ts = current_time(old_dir);
+	if (new_inode) {
+		if (is_dir) {
+			err = fat_dir_empty(new_inode);
+			if (err)
+				goto out;
+		}
+		new_i_pos = MSDOS_I(new_inode)->i_pos;
+		fat_detach(new_inode);
+	} else {
+		err = vfat_add_entry(new_dir, &new_dentry->d_name, is_dir, 0,
+				     &ts, &sinfo);
+		if (err)
+			goto out;
+		new_i_pos = sinfo.i_pos;
+	}
+	inode_inc_iversion(new_dir);
+
+	fat_detach(old_inode);
+	fat_attach(old_inode, new_i_pos);
+	if (IS_DIRSYNC(new_dir)) {
+		err = fat_sync_inode(old_inode);
+		if (err)
+			goto error_inode;
+	} else
+		mark_inode_dirty(old_inode);
+
+	if (update_dotdot) {
+		fat_set_start(dotdot_de, MSDOS_I(new_dir)->i_logstart);
+		mark_buffer_dirty_inode(dotdot_bh, old_inode);
+		if (IS_DIRSYNC(new_dir)) {
+			err = sync_dirty_buffer(dotdot_bh);
+			if (err)
+				goto error_dotdot;
+		}
+		drop_nlink(old_dir);
+		if (!new_inode)
+			inc_nlink(new_dir);
+	}
+
+	err = fat_remove_entries(old_dir, &old_sinfo); /* and releases bh */
+	old_sinfo.bh = NULL;
+	if (err)
+		goto error_dotdot;
+	inode_inc_iversion(old_dir);
+	fat_truncate_time(old_dir, &ts, S_CTIME | S_MTIME);
+	if (IS_DIRSYNC(old_dir))
+		(void)fat_sync_inode(old_dir);
+	else
+		mark_inode_dirty(old_dir);
+
+	if (new_inode) {
+		drop_nlink(new_inode);
+		if (is_dir)
+			drop_nlink(new_inode);
+		fat_truncate_time(new_inode, &ts, S_CTIME);
+	}
+out:
+	brelse(sinfo.bh);
+	brelse(dotdot_bh);
+	brelse(old_sinfo.bh);
+	mutex_unlock(&MSDOS_SB(sb)->s_lock);
+
+	return err;
+
+error_dotdot:
+	/* data cluster is shared, serious corruption */
+	corrupt = 1;
+
+	if (update_dotdot) {
+		fat_set_start(dotdot_de, MSDOS_I(old_dir)->i_logstart);
+		mark_buffer_dirty_inode(dotdot_bh, old_inode);
+		corrupt |= sync_dirty_buffer(dotdot_bh);
+	}
+error_inode:
+	fat_detach(old_inode);
+	fat_attach(old_inode, old_sinfo.i_pos);
+	if (new_inode) {
+		fat_attach(new_inode, new_i_pos);
+		if (corrupt)
+			corrupt |= fat_sync_inode(new_inode);
+	} else {
+		/*
+		 * If new entry was not sharing the data cluster, it
+		 * shouldn't be serious corruption.
+		 */
+		int err2 = fat_remove_entries(new_dir, &sinfo);
+		if (corrupt)
+			corrupt |= err2;
+		sinfo.bh = NULL;
+	}
+	if (corrupt < 0) {
+		fat_fs_error(new_dir->i_sb,
+			     "%s: Filesystem corrupted (i_pos %lld)", __func__,
+			     sinfo.i_pos);
+	}
+	goto out;
+}
+
+int ddfs_setattr(struct dentry *dentry, struct iattr *attr)
+{
+	struct msdos_sb_info *sbi = MSDOS_SB(dentry->d_sb);
+	struct inode *inode = d_inode(dentry);
+	unsigned int ia_valid;
+	int error;
+
+	/* Check for setting the inode time. */
+	ia_valid = attr->ia_valid;
+	if (ia_valid & TIMES_SET_FLAGS) {
+		if (fat_allow_set_time(sbi, inode))
+			attr->ia_valid &= ~TIMES_SET_FLAGS;
+	}
+
+	error = setattr_prepare(dentry, attr);
+	attr->ia_valid = ia_valid;
+	if (error) {
+		if (sbi->options.quiet)
+			error = 0;
+		goto out;
+	}
+
+	/*
+	 * Expand the file. Since inode_setattr() updates ->i_size
+	 * before calling the ->truncate(), but FAT needs to fill the
+	 * hole before it. XXX: this is no longer true with new truncate
+	 * sequence.
+	 */
+	if (attr->ia_valid & ATTR_SIZE) {
+		inode_dio_wait(inode);
+
+		if (attr->ia_size > inode->i_size) {
+			error = fat_cont_expand(inode, attr->ia_size);
+			if (error || attr->ia_valid == ATTR_SIZE)
+				goto out;
+			attr->ia_valid &= ~ATTR_SIZE;
+		}
+	}
+
+	if (((attr->ia_valid & ATTR_UID) &&
+	     (!uid_eq(attr->ia_uid, sbi->options.fs_uid))) ||
+	    ((attr->ia_valid & ATTR_GID) &&
+	     (!gid_eq(attr->ia_gid, sbi->options.fs_gid))) ||
+	    ((attr->ia_valid & ATTR_MODE) && (attr->ia_mode & ~FAT_VALID_MODE)))
+		error = -EPERM;
+
+	if (error) {
+		if (sbi->options.quiet)
+			error = 0;
+		goto out;
+	}
+
+	/*
+	 * We don't return -EPERM here. Yes, strange, but this is too
+	 * old behavior.
+	 */
+	if (attr->ia_valid & ATTR_MODE) {
+		if (fat_sanitize_mode(sbi, inode, &attr->ia_mode) < 0)
+			attr->ia_valid &= ~ATTR_MODE;
+	}
+
+	if (attr->ia_valid & ATTR_SIZE) {
+		error = fat_block_truncate_page(inode, attr->ia_size);
+		if (error)
+			goto out;
+		down_write(&MSDOS_I(inode)->truncate_lock);
+		truncate_setsize(inode, attr->ia_size);
+		fat_truncate_blocks(inode, attr->ia_size);
+		up_write(&MSDOS_I(inode)->truncate_lock);
+	}
+
+	/*
+	 * setattr_copy can't truncate these appropriately, so we'll
+	 * copy them ourselves
+	 */
+	if (attr->ia_valid & ATTR_ATIME)
+		fat_truncate_time(inode, &attr->ia_atime, S_ATIME);
+	if (attr->ia_valid & ATTR_CTIME)
+		fat_truncate_time(inode, &attr->ia_ctime, S_CTIME);
+	if (attr->ia_valid & ATTR_MTIME)
+		fat_truncate_time(inode, &attr->ia_mtime, S_MTIME);
+	attr->ia_valid &= ~(ATTR_ATIME | ATTR_CTIME | ATTR_MTIME);
+
+	setattr_copy(inode, attr);
+	mark_inode_dirty(inode);
+out:
+	return error;
+}
+EXPORT_SYMBOL_GPL(ddfs_setattr);
+
+int ddfs_getattr(const struct path *path, struct kstat *stat, u32 request_mask,
+		 unsigned int flags)
+{
+	struct inode *inode = d_inode(path->dentry);
+	generic_fillattr(inode, stat);
+	stat->blksize = MSDOS_SB(inode->i_sb)->cluster_size;
+
+	if (MSDOS_SB(inode->i_sb)->options.nfs == FAT_NFS_NOSTALE_RO) {
+		/* Use i_pos for ino. This is used as fileid of nfs. */
+		stat->ino = fat_i_pos_read(MSDOS_SB(inode->i_sb), inode);
+	}
+	return 0;
+}
+EXPORT_SYMBOL_GPL(ddfs_getattr);
+
+int ddfs_update_time(struct inode *inode, struct timespec64 *now, int flags)
+{
+	int iflags = I_DIRTY_TIME;
+	bool dirty = false;
+
+	if (inode->i_ino == MSDOS_ROOT_INO)
+		return 0;
+
+	fat_truncate_time(inode, now, flags);
+	if (flags & S_VERSION)
+		dirty = inode_maybe_inc_iversion(inode, false);
+	if ((flags & (S_ATIME | S_CTIME | S_MTIME)) &&
+	    !(inode->i_sb->s_flags & SB_LAZYTIME))
+		dirty = true;
+
+	if (dirty)
+		iflags |= I_DIRTY_SYNC;
+	__mark_inode_dirty(inode, iflags);
+	return 0;
+}
+EXPORT_SYMBOL_GPL(ddfs_update_time);
 
 static const struct inode_operations vfat_dir_inode_operations = {
-	.create = vfat_create,
-	.lookup = vfat_lookup,
-	.unlink = vfat_unlink,
-	.mkdir = vfat_mkdir,
-	.rmdir = vfat_rmdir,
-	.rename = vfat_rename,
-	.setattr = fat_setattr,
-	.getattr = fat_getattr,
-	.update_time = fat_update_time,
+	.create = ddfs_create,
+	.lookup = ddfs_lookup,
+	.unlink = ddfs_unlink,
+	.mkdir = ddfs_mkdir,
+	.rmdir = ddfs_rmdir,
+	.rename = ddfs_rename,
+	.setattr = ddfs_setattr,
+	.getattr = ddfs_getattr,
+	.update_time = ddfs_update_time,
 };
 
-static const struct dentry_operations vfat_dentry_ops = {
-	.d_revalidate = vfat_revalidate,
-	.d_hash = vfat_hash,
-	.d_compare = vfat_cmp,
+static int ddfs_revalidate(struct dentry *dentry, unsigned int flags)
+{
+	if (flags & LOOKUP_RCU)
+		return -ECHILD;
+
+	/* This is not negative dentry. Always valid. */
+	if (d_really_is_positive(dentry))
+		return 1;
+	return vfat_revalidate_shortname(dentry);
+}
+
+static int ddfs_hash(const struct dentry *dentry, struct qstr *qstr)
+{
+	qstr->hash =
+		full_name_hash(dentry, qstr->name, vfat_striptail_len(qstr));
+	return 0;
+}
+
+static int ddfs_cmp(const struct dentry *dentry, unsigned int len,
+		    const char *str, const struct qstr *name)
+{
+	unsigned int alen, blen;
+
+	/* A filename cannot end in '.' or we treat it like it has none */
+	alen = vfat_striptail_len(name);
+	blen = __vfat_striptail_len(len, str);
+	if (alen == blen) {
+		if (strncmp(name->name, str, alen) == 0)
+			return 0;
+	}
+	return 1;
+}
+
+static const struct dentry_operations ddfs_dentry_ops = {
+	.d_revalidate = ddfs_revalidate,
+	.d_hash = ddfs_hash,
+	.d_compare = ddfs_cmp,
 };
 
 struct ddfs_boot_sector {
@@ -363,7 +882,7 @@ static int ddfs_fill_super(struct super_block *sb, void *data, int silent)
 	sb->s_flags |= SB_NODIRATIME;
 	sb->s_magic = DDFS_SUPER_MAGIC;
 	sb->s_op = &fat_sops;
-	sb->s_export_op = &fat_export_ops;
+	sb->s_export_op = &ddfs_export_ops;
 	sb->s_time_gran = 1;
 	mutex_init(&sbi->nfs_build_inode_lock);
 	ratelimit_state_init(&sbi->ratelimit, DEFAULT_RATELIMIT_INTERVAL,
@@ -374,8 +893,8 @@ static int ddfs_fill_super(struct super_block *sb, void *data, int silent)
 		goto out_fail;
 	}
 
-	sb->s_fs_info->dir_ops = &vfat_dir_inode_operations;
-	sb->s_d_op = &vfat_dentry_ops;
+	sb->s_fs_info->dir_ops = &ddfs_dir_inode_operations;
+	sb->s_d_op = &ddfs_dentry_ops;
 
 	error = -EIO;
 	sb_min_blocksize(sb, 512);
