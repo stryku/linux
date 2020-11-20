@@ -8,7 +8,7 @@ all:
 clean:
 	make -C $(KERNELDIR) M=$(PWD) clean
 
-insert:
+insert: all rmmod
 	sudo insmod ddfs.ko
 
 rmmod:
