@@ -23,7 +23,7 @@ static struct dentry *ddfs_mount(struct file_system_type *fs_type, int flags,
 {
 	dd_print("init_ddfs_fs\n");
 	// return mount_bdev(fs_type, flags, dev_name, data, ddfs_fill_super);
-	return NULL;
+	return ERR_PTR(-EINVAL);
 }
 
 static struct file_system_type ddfs_fs_type = {

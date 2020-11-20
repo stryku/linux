@@ -14,6 +14,3 @@ insert: all rmmod
 rmmod:
 	sudo rmmod ddfs
 
-install:
-	make -C $(KERNELDIR) M=$(PWD) modules_install
-
