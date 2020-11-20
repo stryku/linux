@@ -14,5 +14,7 @@ static void hello_exit(void)
 	printk(KERN_ALERT "Goodbye world\n");
 }
 
+MODULE_ALIAS_FS("ddfs");
+
 module_init(hello_init);
 module_exit(hello_exit);
