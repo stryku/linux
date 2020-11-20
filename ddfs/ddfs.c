@@ -43,7 +43,7 @@ static int __init init_ddfs_fs(void)
 static void __exit exit_ddfs_fs(void)
 {
 	dd_print("exit_ddfs_fs\n");
-	// unregister_filesystem(&ddfs_fs_type);
+	unregister_filesystem(&ddfs_fs_type);
 }
 
 MODULE_ALIAS_FS("ddfs");
