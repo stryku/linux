@@ -1043,6 +1043,7 @@ static long ddfs_add_dir_entry(struct inode *dir, const struct qstr *qname,
 	*de = ddfs_make_dir_entry(&parts_ptrs);
 	de->attributes = DDFS_FILE_ATTR;
 	de->size = 0;
+	de->entry_index = new_entry_index;
 
 	release_dir_entries(&parts_ptrs,
 			    DDFS_PART_NAME | DDFS_PART_FIRST_CLUSTER);
