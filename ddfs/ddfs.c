@@ -400,14 +400,7 @@ static void ddfs_evict_inode(struct inode *inode)
 
 static void ddfs_put_super(struct super_block *sb)
 {
-	struct msdos_sb_info *sbi = MSDOS_SB(sb);
-
-	fat_set_state(sb, 0, 0);
-
-	iput(sbi->fsinfo_inode);
-	iput(sbi->fat_inode);
-
-	call_rcu(&sbi->rcu, delayed_free);
+	// Todo: put table inode
 }
 
 static int ddfs_statfs(struct dentry *dentry, struct kstatfs *buf)
