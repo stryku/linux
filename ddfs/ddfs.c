@@ -61,6 +61,7 @@ struct ddfs_inode_info {
 #define DDFS_DIR_ENTRY_FIRST_CLUSTER_TYPE __u32
 
 struct ddfs_dir_entry {
+	unsigned entry_index;
 #define DDFS_DIR_ENTRY_NAME_CHARS_IN_PLACE 4
 	DDFS_DIR_ENTRY_NAME_TYPE name[DDFS_DIR_ENTRY_NAME_CHARS_IN_PLACE];
 #define DDFS_FILE_ATTR 1
@@ -96,6 +97,7 @@ struct ddfs_sb_info {
 
 	struct mutex table_lock;
 	struct mutex s_lock;
+	struct mutex build_inode_lock;
 };
 
 static inline struct ddfs_sb_info *DDFS_SB(struct super_block *sb)
@@ -345,7 +347,7 @@ static struct inode *ddfs_alloc_inode(struct super_block *sb)
 
 static void ddfs_free_inode(struct inode *inode)
 {
-	kmem_cache_free(ddfs_inode_cachep, MSDOS_I(inode));
+	kmem_cache_free(ddfs_inode_cachep, DDFS_I(inode));
 }
 
 // static inline loff_t ddfs_i_pos_read(struct ddfs_sb_info *sbi,
@@ -512,6 +514,16 @@ static inline void lock_data(struct ddfs_sb_info *sbi)
 static inline void unlock_data(struct ddfs_sb_info *sbi)
 {
 	mutex_unlock(&sbi->s_lock);
+}
+
+static inline void lock_inode_build(struct ddfs_sb_info *sbi)
+{
+	mutex_lock(&sbi->build_inode_lock);
+}
+
+static inline void unlock_inode_build(struct ddfs_sb_info *sbi)
+{
+	mutex_unlock(&sbi->build_inode_lock);
 }
 
 static inline void table_write_cluster(struct ddfs_sb_info *sbi,
@@ -886,6 +898,64 @@ fail_io:
 	return -EIO;
 }
 
+/* doesn't deal with root inode */
+int ddfs_fill_inode(struct inode *inode, struct ddfs_dir_entry *de)
+{
+	struct msdos_sb_info *sbi = MSDOS_SB(inode->i_sb);
+	struct ddfs_inode_info *dd_inode = DDFS_I(inode);
+	int error;
+
+	dd_inode->i_pos = 0;
+	inode->i_uid = sbi->options.fs_uid;
+	inode->i_gid = sbi->options.fs_gid;
+	inode_inc_iversion(inode);
+	inode->i_generation = get_seconds();
+
+	// Todo: Handle directory filling
+
+	dd_inode->i_start = de->first_cluster;
+
+	dd_inode->i_logstart = dd_inode->i_start;
+	inode->i_size = le32_to_cpu(de->size);
+	inode->i_op = &ddfs_file_inode_operations;
+	inode->i_fop = &ddfs_file_operations;
+	inode->i_mapping->a_ops = &ddfs_aops;
+	dd_inode->mmu_private = inode->i_size;
+
+	inode->i_blocks = inode->i_size / inode->i_sb->block_size;
+
+	return 0;
+}
+
+struct inode *ddfs_build_inode(struct super_block *sb,
+			       struct ddfs_dir_entry *de)
+{
+	struct inode *inode;
+	int err;
+
+	lock_inode_build(MSDOS_SB(sb));
+
+	inode = new_inode(sb);
+	if (!inode) {
+		inode = ERR_PTR(-ENOMEM);
+		goto out;
+	}
+	inode->i_ino = iunique(sb, 128); // todo: 128 is probably not needed
+	inode_set_iversion(inode, 1);
+	err = ddfs_fill_inode(inode, de);
+	if (err) {
+		iput(inode);
+		inode = ERR_PTR(err);
+		goto out;
+	}
+	fat_attach(inode, i_pos);
+	insert_inode_hash(inode);
+
+out:
+	unlock_inode_build(MSDOS_SB(sb));
+	return inode;
+}
+
 static int ddfs_create(struct inode *dir, struct dentry *dentry, umode_t mode,
 		       bool excl)
 {
@@ -906,17 +976,17 @@ static int ddfs_create(struct inode *dir, struct dentry *dentry, umode_t mode,
 	}
 	inode_inc_iversion(dir);
 
-	// inode = fat_build_inode(sb, sinfo.de, sinfo.i_pos);
-	// brelse(sinfo.bh);
-	// if (IS_ERR(inode)) {
-	// 	err = PTR_ERR(inode);
-	// 	goto out;
-	// }
-	// inode_inc_iversion(inode);
-	// fat_truncate_time(inode, &ts, S_ATIME | S_CTIME | S_MTIME);
-	// /* timestamp is already written, so mark_inode_dirty() is unneeded. */
+	inode = fat_build_inode(sb, sinfo.de, sinfo.i_pos);
+	brelse(sinfo.bh);
+	if (IS_ERR(inode)) {
+		err = PTR_ERR(inode);
+		goto out;
+	}
+	inode_inc_iversion(inode);
+	fat_truncate_time(inode, &ts, S_ATIME | S_CTIME | S_MTIME);
+	/* timestamp is already written, so mark_inode_dirty() is unneeded. */
 
-	// d_instantiate(dentry, inode);
+	d_instantiate(dentry, inode);
 out:
 	unlock_data(sbi);
 	return err;
@@ -926,12 +996,13 @@ static struct dentry *ddfs_lookup(struct inode *dir, struct dentry *dentry,
 				  unsigned int flags)
 {
 	struct super_block *sb = dir->i_sb;
+	struct ddfs_super_block_info *sbi = DDFS_SB(sb);
 	struct fat_slot_info sinfo;
 	struct inode *inode;
 	struct dentry *alias;
 	int err;
 
-	mutex_lock(&MSDOS_SB(sb)->s_lock);
+	lock_data(sbi);
 
 	err = vfat_find(dir, &dentry->d_name, &sinfo);
 	if (err) {
