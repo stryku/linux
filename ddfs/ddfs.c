@@ -1040,14 +1040,14 @@ static struct dentry *ddfs_lookup(struct inode *dir, struct dentry *dentry,
 {
 	struct super_block *sb = dir->i_sb;
 	struct ddfs_super_block_info *sbi = DDFS_SB(sb);
-	struct fat_slot_info sinfo;
+	struct ddfs_dir_entry de;
 	struct inode *inode;
 	struct dentry *alias;
 	int err;
 
 	lock_data(sbi);
 
-	err = vfat_find(dir, &dentry->d_name, &sinfo);
+	err = ddfs_find(dir, &dentry->d_name, &de);
 	if (err) {
 		if (err == -ENOENT) {
 			inode = NULL;
@@ -1056,8 +1056,7 @@ static struct dentry *ddfs_lookup(struct inode *dir, struct dentry *dentry,
 		goto error;
 	}
 
-	inode = ddfs_build_inode(sb, sinfo.de, sinfo.i_pos);
-	brelse(sinfo.bh);
+	inode = ddfs_build_inode(sb, de);
 	if (IS_ERR(inode)) {
 		err = PTR_ERR(inode);
 		goto error;
@@ -1076,21 +1075,21 @@ static struct dentry *ddfs_lookup(struct inode *dir, struct dentry *dentry,
 		 *
 		 * Switch to new one for reason of locality if possible.
 		 */
-		if (!S_ISDIR(inode->i_mode))
+		if (!S_ISDIR(inode->i_mode)) {
 			d_move(alias, dentry);
+		}
 		iput(inode);
-		mutex_unlock(&MSDOS_SB(sb)->s_lock);
+		unlock_data(sbi);
 		return alias;
-	} else
+	} else {
 		dput(alias);
+	}
 
 out:
-	mutex_unlock(&MSDOS_SB(sb)->s_lock);
-	if (!inode)
-		vfat_d_version_set(dentry, inode_query_iversion(dir));
+	unlock_data(sbi);
 	return d_splice_alias(inode, dentry);
 error:
-	mutex_unlock(&MSDOS_SB(sb)->s_lock);
+	unlock_data(sbi);
 	return ERR_PTR(err);
 }
 
