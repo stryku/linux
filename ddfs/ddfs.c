@@ -91,6 +91,17 @@ struct ddfs_dir_entry {
 	DDFS_DIR_ENTRY_FIRST_CLUSTER_TYPE first_cluster;
 };
 
+static inline void dump_ddfs_dir_entry(const struct ddfs_dir_entry *entry)
+{
+	dd_print("dump_ddfs_dir_entry: %p", entry);
+
+	dd_print("\t\tentry->entry_index %u", entry->entry_index);
+	dd_print("\t\tentry->name %s", entry->name);
+	dd_print("\t\tentry->attributes %u", (unsigned)entry->attributes);
+	dd_print("\t\tentry->size %lu", entry->size);
+	dd_print("\t\tentry->first_cluster %u", (unsigned)entry->first_cluster);
+}
+
 static inline struct ddfs_inode_info *DDFS_I(struct inode *inode)
 {
 	return container_of(inode, struct ddfs_inode_info, ddfs_inode);
@@ -1086,6 +1097,10 @@ int ddfs_fill_inode(struct inode *inode, struct ddfs_dir_entry *de)
 {
 	struct ddfs_inode_info *dd_inode = DDFS_I(inode);
 
+	dd_print("ddfs_fill_inode: inode: %p, de: %p", inode, de);
+	dump_ddfs_inode_info(dd_inode);
+	dump_ddfs_dir_entry(de);
+
 	dd_inode->i_pos = 0;
 	// inode->i_uid = sbi->options.fs_uid;
 	// inode->i_gid = sbi->options.fs_gid;
@@ -1105,6 +1120,10 @@ int ddfs_fill_inode(struct inode *inode, struct ddfs_dir_entry *de)
 
 	inode->i_blocks = inode->i_size / inode->i_sb->s_blocksize;
 
+	dd_print("filled inode");
+	dump_ddfs_inode_info(dd_inode);
+
+	dd_print("~ddfs_fill_inode 0");
 	return 0;
 }
 
@@ -1116,24 +1135,38 @@ struct inode *ddfs_build_inode(struct super_block *sb,
 
 	lock_inode_build(DDFS_SB(sb));
 
+	dd_print("ddfs_build_inode, de: ");
+	dump_ddfs_dir_entry(de);
+
+	dd_print("calling new_inode");
 	inode = new_inode(sb);
 	if (!inode) {
+		dd_print("new_inode call failed");
 		inode = ERR_PTR(-ENOMEM);
 		goto out;
 	}
+	dd_print("new_inode call succeed");
+
 	inode->i_ino = iunique(sb, 128); // todo: 128 is probably not needed
 	inode_set_iversion(inode, 1);
+
+	dd_print("calling ddfs_fill_inode");
 	err = ddfs_fill_inode(inode, de);
 	if (err) {
+		dd_print("ddfs_fill_inode call failed");
 		iput(inode);
 		inode = ERR_PTR(err);
 		goto out;
 	}
+
+	dd_print("ddfs_fill_inode call succeed");
+
 	// fat_attach(inode, i_pos);
-	// insert_inode_hash(inode);
+	insert_inode_hash(inode);
 
 out:
 	unlock_inode_build(DDFS_SB(sb));
+	dd_print("~ddfs_fill_inode, inode: %p", inode);
 	return inode;
 }
 
@@ -1178,8 +1211,8 @@ static int ddfs_create(struct inode *dir, struct dentry *dentry, umode_t mode,
 	/* timestamp is already written, so mark_inode_dirty() is unneeded. */
 
 	dd_print("calling d_instantiate");
-
 	d_instantiate(dentry, inode);
+
 out:
 	unlock_data(sbi);
 	dd_print("~ddfs_create %d", err);
