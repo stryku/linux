@@ -313,6 +313,23 @@ access_dir_entries(struct inode *dir, unsigned entry_index, unsigned part_flags)
 	return result;
 }
 
+static inline void release_dir_entries(const struct dir_entry_ptrs *ptrs,
+				       unsigned part_flags)
+{
+	if (part_flags & DDFS_PART_NAME && ptrs->name.bh) {
+		brelse(ptrs->name.bh);
+	}
+	if (part_flags & DDFS_PART_ATTRIBUTES && ptrs->attributes.bh) {
+		brelse(ptrs->attributes.bh);
+	}
+	if (part_flags & DDFS_PART_SIZE && ptrs->size.bh) {
+		brelse(ptrs->size.bh);
+	}
+	if (part_flags & DDFS_PART_FIRST_CLUSTER && ptrs->first_cluster.bh) {
+		brelse(ptrs->first_cluster.bh);
+	}
+}
+
 static struct kmem_cache *ddfs_inode_cachep;
 
 static struct inode *ddfs_alloc_inode(struct super_block *sb)
@@ -875,8 +892,10 @@ static long ddfs_add_dir_entry(struct inode *dir, const struct qstr *qname)
 
 	lock_data(sbi);
 
-	bh = sb_bread(sb, offsets.name.block_on_device);
-	if (!bh) {
+	const struct dir_entry_ptrs parts_ptrs = access_dir_entries(
+		dir, new_entry_index, DDFS_PART_NAME | DDFS_PART_FIRST_CLUSTER);
+
+	if (!parts_ptrs.name.bh) {
 		unlock_data(sbi);
 		--dd_idir->number_of_entries;
 		dd_error("unable to read inode block for updating (i_pos %lld)",
@@ -884,39 +903,46 @@ static long ddfs_add_dir_entry(struct inode *dir, const struct qstr *qname)
 		return -EIO;
 	}
 
-	DDFS_DIR_ENTRY_FIRST_CLUSTER_TYPE *name_ptr =
-		(DDFS_DIR_ENTRY_FIRST_CLUSTER_TYPE *)(bh->b_data +
-						      new_entry_offset_on_block);
+	// bh = sb_bread(sb, offsets.name.block_on_device);
+	// if (!bh) {
+	// 	unlock_data(sbi);
+	// 	--dd_idir->number_of_entries;
+	// 	dd_error("unable to read inode block for updating (i_pos %lld)",
+	// 		 i_pos);
+	// 	return -EIO;
+	// }
+
+	// DDFS_DIR_ENTRY_FIRST_CLUSTER_TYPE *name_ptr =
+	// 	(DDFS_DIR_ENTRY_FIRST_CLUSTER_TYPE *)(bh->b_data +
+	// 					      new_entry_offset_on_block);
 
 	int i;
 	for (i = 0; i < DDFS_DIR_ENTRY_NAME_CHARS_IN_PLACE; ++i) {
-		name_ptr[i] = qname->name[i];
-		if (!qname->name) {
+		parts_ptrs.name.ptr[i] = qname->name[i];
+		if (!qname->name[i]) {
 			break;
 		}
 	}
-	if (new_entry_first_cluster_block_no_on_device !=
-	    new_entry_name_block_no_on_device) {
-		mark_buffer_dirty_inode(bh, dir);
-		brelse(bh);
 
-		bh = sb_bread(sb, new_entry_first_cluster_block_no_on_device);
-		if (!bh) {
-			unlock_data(sbi);
-			--dd_idir->number_of_entries;
-			dd_error(
-				"unable to read inode block for updating (i_pos %lld)",
-				i_pos);
-			return -EIO;
-		}
-	}
+	mark_buffer_dirty_inode(parts_ptrs.name.bh, dir);
 
-	DDFS_DIR_ENTRY_FIRST_CLUSTER_TYPE *first_cluster_ptr =
-		(DDFS_DIR_ENTRY_FIRST_CLUSTER_TYPE
-			 *)(bh->b_data + first_cluster_entry_offset_on_block);
+	// bh = sb_bread(sb, new_entry_first_cluster_block_no_on_device);
+	// if (!bh) {
+	// 	unlock_data(sbi);
+	// 	--dd_idir->number_of_entries;
+	// 	dd_error(
+	// 		"unable to read inode block for updating (i_pos %lld)",
+	// 		i_pos);
+	// 	return -EIO;
+	// }
 
-	*first_cluster_ptr = DDFS_CLUSTER_UNUSED;
-	brelse(bh);
+	*parts_ptrs.first_cluster.ptr = DDFS_CLUSTER_UNUSED;
+	mark_buffer_dirty_inode(parts_ptrs.first_cluster.bh, dir);
+
+	// brelse(bh);
+
+	release_dir_entries(*parts_ptrs,
+			    DDFS_PART_NAME | DDFS_PART_FIRST_CLUSTER);
 
 	unlock_data(sbi);
 
