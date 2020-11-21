@@ -1234,7 +1234,7 @@ static struct dentry *ddfs_lookup(struct inode *dir, struct dentry *dentry,
 	struct inode *inode;
 	struct dentry *alias;
 	int err;
-	char dname_buf[128] = { 0 };
+	// char dname_buf[128] = { 0 };
 
 	lock_data(sbi);
 
@@ -1242,10 +1242,10 @@ static struct dentry *ddfs_lookup(struct inode *dir, struct dentry *dentry,
 		 flags);
 	dump_ddfs_inode_info(DDFS_I(dir));
 
-	dentry->d_op->d_dname(dentry, dname_buf, 128);
+	// dentry->d_op->d_dname(dentry, dname_buf, 128);
 
-	// err = ddfs_find(dir, (const char *)(&dentry->d_name.name), &de);
-	err = ddfs_find(dir, dname_buf, &de);
+	err = ddfs_find(dir, (const char *)(dentry->d_name.name), &de);
+	// err = ddfs_find(dir, dname_buf, &de);
 	if (err) {
 		if (err == -ENOENT) {
 			inode = NULL;
