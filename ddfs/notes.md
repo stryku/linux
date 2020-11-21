@@ -11,4 +11,4 @@ size
 first_cluster
 
 # Commands
-sudo mount -t ddfs -o loop ddfs.img ./ddfs.dir
+sudo mount -t ddfs -o loop ../../ddfs.img ./ddfs.dir

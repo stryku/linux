@@ -55,7 +55,7 @@ struct ddfs_inode_info {
 	struct hlist_node i_fat_hash; /* hash by i_location */
 	struct hlist_node i_dir_hash; /* hash by i_logstart */
 	struct rw_semaphore truncate_lock; /* protect bmap against truncate */
-	struct inode ddfs_inode;
+	struct inode ddfs_inode; // Todo: Should be named vfs_inode
 };
 
 #define DDFS_DIR_ENTRY_NAME_TYPE __u8
@@ -373,11 +373,21 @@ static struct kmem_cache *ddfs_inode_cachep;
 static struct inode *ddfs_alloc_inode(struct super_block *sb)
 {
 	struct ddfs_inode_info *ei;
+	dd_print("ddfs_alloc_inode");
+	dd_print("calling kmem_cache_alloc");
 	ei = kmem_cache_alloc(ddfs_inode_cachep, GFP_NOFS);
-	if (!ei)
+	if (!ei) {
+		dd_print("kmem_cache_alloc failed");
+		dd_print("~ddfs_alloc_inode NULL");
 		return NULL;
+	}
 
+	dd_print("kmem_cache_alloc succeed");
+
+	dd_print("calling init_rwsem");
 	init_rwsem(&ei->truncate_lock);
+
+	dd_print("~ddfs_alloc_inode %p", &ei->ddfs_inode);
 	return &ei->ddfs_inode;
 }
 
@@ -1767,10 +1777,59 @@ static struct file_system_type ddfs_fs_type = {
 	.fs_flags = FS_REQUIRES_DEV,
 };
 
+static void init_once(void *foo)
+{
+	struct ddfs_inode_info *ei = (struct ddfs_inode_info *)foo;
+
+	spin_lock_init(&ei->cache_lru_lock);
+	ei->nr_caches = 0;
+	ei->cache_valid_id = 1;
+	INIT_LIST_HEAD(&ei->cache_lru);
+	INIT_HLIST_NODE(&ei->i_fat_hash);
+	INIT_HLIST_NODE(&ei->i_dir_hash);
+	inode_init_once(&ei->ddfs_inode);
+}
+
+static int __init ddfs_init_inodecache(void)
+{
+	dd_print("ddfs_init_inodecache");
+
+	ddfs_inode_cachep = kmem_cache_create(
+		"ddfs_inode_cachep", sizeof(struct ddfs_inode_info), 0,
+		(SLAB_RECLAIM_ACCOUNT | SLAB_MEM_SPREAD | SLAB_ACCOUNT),
+		init_once);
+
+	if (ddfs_inode_cachep == NULL) {
+		dd_print("kmem_cache_create failed");
+		dd_print("~ddfs_init_inodecache %d", -ENOMEM);
+		return -ENOMEM;
+	}
+	dd_print("kmem_cache_create succeed");
+
+	dd_print("~ddfs_init_inodecache 0");
+	return 0;
+}
+
+static void __exit ddfs_destroy_inodecache(void)
+{
+	dd_print("ddfs_destroy_inodecache");
+	rcu_barrier();
+	kmem_cache_destroy(ddfs_inode_cachep);
+	dd_print("~ddfs_destroy_inodecache");
+}
+
 static int __init init_ddfs_fs(void)
 {
 	int err;
 	dd_print("init_ddfs_fs");
+
+	err = ddfs_init_inodecache();
+	if (err) {
+		dd_print("ddfs_init_inodecache failed with %d", err);
+		dd_print("~init_ddfs_fs %d", err);
+		return err;
+	}
+
 	err = register_filesystem(&ddfs_fs_type);
 	dd_print("~init_ddfs_fs");
 	return err;
@@ -1779,6 +1838,10 @@ static int __init init_ddfs_fs(void)
 static void __exit exit_ddfs_fs(void)
 {
 	dd_print("exit_ddfs_fs");
+
+	dd_print("calling ddfs_destroy_inodecache");
+	ddfs_destroy_inodecache();
+
 	unregister_filesystem(&ddfs_fs_type);
 	dd_print("~exit_ddfs_fs");
 }
@@ -1787,3 +1850,5 @@ MODULE_ALIAS_FS("ddfs");
 
 module_init(init_ddfs_fs);
 module_exit(exit_ddfs_fs);
+
+//////
