@@ -25,6 +25,9 @@ MODULE_LICENSE("Dual BSD/GPL");
  * DDFS inode data in memory
  */
 struct ddfs_inode_info {
+	unsigned dentry_index; //
+
+	// fat stuff:
 	spinlock_t cache_lru_lock;
 	struct list_head cache_lru;
 	int nr_caches;
@@ -44,6 +47,21 @@ struct ddfs_inode_info {
 	struct inode ddfs_inode;
 };
 
+#define DDFS_DIR_ENTRY_NAME_TYPE __u8
+#define DDFS_DIR_ENTRY_ATTRIBUTES_TYPE __u8
+#define DDFS_DIR_ENTRY_SIZE_TYPE __u64
+#define DDFS_DIR_ENTRY_FIRST_CLUSTER_TYPE __u32
+
+struct ddfs_dir_entry {
+#define DDFS_DIR_ENTRY_NAME_CHARS_IN_PLACE 4
+	DDFS_DIR_ENTRY_NAME_TYPE name[DDFS_DIR_ENTRY_NAME_CHARS_IN_PLACE];
+#define DDFS_FILE_ATTR 1
+#define DDFS_DIR_ATTR 2
+	DDFS_DIR_ENTRY_ATTRIBUTES_TYPE attributes;
+	DDFS_DIR_ENTRY_SIZE_TYPE size;
+	DDFS_DIR_ENTRY_FIRST_CLUSTER_TYPE first_cluster;
+};
+
 static inline struct ddfs_inode_info *DDFS_I(struct inode *inode)
 {
 	return container_of(inode, struct ddfs_inode_info, ddfs_inode);
@@ -59,6 +77,13 @@ struct ddfs_sb_info {
 	unsigned int data_offset; // From begin of partition
 
 	unsigned long block_size; // Size of block (sector) in bytes
+
+	unsigned int entries_per_cluster; // Dir entries per cluster
+
+	unsigned int name_entries_start;
+	unsigned int attributes_entries_start;
+	unsigned int size_entries_start;
+	unsigned int first_cluster_entries_start;
 };
 
 static inline struct ddfs_sb_info *DDFS_SB(struct super_block *sb)
@@ -166,26 +191,50 @@ retry:
 			 i_pos) return -EIO;
 	}
 
-	spin_lock(&sbi->inode_hash_lock);
+	// Todo: do we need it?
+	// spin_lock(&sbi->inode_hash_lock);
 	if (i_pos != DDFS_I(inode)->i_pos) {
-		spin_unlock(&sbi->inode_hash_lock);
+		// spin_unlock(&sbi->inode_hash_lock);
 		brelse(bh);
 		goto retry;
 	}
 
-	raw_entry = &((struct ddfs_dir_entry *)(bh->b_data))[offset];
-	if (S_ISDIR(inode->i_mode)) {
-		raw_entry->size = 0;
-	} else {
-		raw_entry->size = cpu_to_le32(inode->i_size);
-	}
+	// Todo check whether entry index is inside cluster
 
-	raw_entry->attr = ddfs_make_attrs(inode);
-	ddfs_set_start(raw_entry, DDFS_I(inode)->i_logstart);
-	ddfs_time_unix2fat(sbi, &inode->i_mtime, &raw_entry->time,
-			   &raw_entry->date, NULL);
+	// Write first_cluster
+	const unsigned first_cluster_offset =
+		sbi->first_cluster_entries_start +
+		DDFS_I(inode)->entry_index *
+			sizeof(DDFS_DIR_ENTRY_FIRST_CLUSTER_TYPE);
+	*((__u32)(bh->b_data + size_offset)) = DDFS_I(inode)->i_logstart;
 
-	spin_unlock(&sbi->inode_hash_lock);
+	// Write size
+	const unsigned size_offset =
+		sbi->size_entries_start +
+		DDFS_I(inode)->entry_index * sizeof(DDFS_DIR_ENTRY_SIZE_TYPE);
+	*((__u32)(bh->b_data + size_offset)) = inode->i_size;
+
+	// Write dummy attributes
+	const unsigned attributes_offset =
+		sbi->attributes_entries_start +
+		DDFS_I(inode)->entry_index *
+			sizeof(DDFS_DIR_ENTRY_ATTRIBUTES_TYPE);
+	*((__u8)(bh->b_data + size_offset)) = DDFS_FILE_ATTR;
+
+	/////////////////////////////////////////
+	// raw_entry = &((struct ddfs_dir_entry *)(bh->b_data))[offset];
+	// if (S_ISDIR(inode->i_mode)) {
+	// 	raw_entry->size = 0;
+	// } else {
+	// 	raw_entry->size = cpu_to_le32(inode->i_size);
+	// }
+
+	// raw_entry->attr = ddfs_make_attrs(inode);
+	// ddfs_set_start(raw_entry, DDFS_I(inode)->i_logstart);
+	// ddfs_time_unix2fat(sbi, &inode->i_mtime, &raw_entry->time,
+	// 		   &raw_entry->date, NULL);
+
+	// spin_unlock(&sbi->inode_hash_lock);
 	mark_buffer_dirty(bh);
 	err = 0;
 	if (wait)
@@ -1026,6 +1075,20 @@ static int ddfs_fill_super(struct super_block *sb, void *data, int silent)
 		boot_sector.number_of_clusters * sizeof(struct ddfs_dir_entry);
 	sbi->data_offset = calculate_data_offset(sbi);
 	sbi->blocksize = sb->s_blocksize;
+
+	sbi->entries_per_cluster =
+		sbi->cluster_size / sizeof(DDFS_DIR_ENTRY_SIZE_TYPE);
+
+	sbi->name_entries_start = = 0;
+	sbi->attributes_entries_start = =
+		sbi->entries_per_cluster * DDFS_DIR_ENTRY_NAME_CHARS_IN_PLACE;
+	sbi->size_entries_start =
+		sbi->attributes_entries_start +
+		sbi->entries_per_cluster *
+			sizeof(DDFS_DIR_ENTRY_ATTRIBUTES_TYPE);
+	sbi->first_cluster_entries_start =
+		sbi->size_entries_start +
+		sbi->entries_per_cluster * sizeof(DDFS_DIR_ENTRY_SIZE_TYPE);
 
 	return -EINVAL;
 
