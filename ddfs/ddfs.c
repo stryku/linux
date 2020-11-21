@@ -72,7 +72,7 @@ void dump_ddfs_inode_info(struct ddfs_inode_info *info)
 	dd_print("\t\tinfo->i_start: %d", info->i_start);
 	dd_print("\t\tinfo->i_logstart: %d", info->i_logstart);
 	dd_print("\t\tinfo->i_attrs: %d", info->i_attrs);
-	dd_print("\t\tinfo->i_pos: %ul", info->i_pos);
+	dd_print("\t\tinfo->i_pos: %llu", info->i_pos);
 }
 
 #define DDFS_DIR_ENTRY_NAME_TYPE __u8
@@ -152,23 +152,23 @@ void dump_dir_entry_offsets(struct dir_entry_offsets *offsets)
 {
 	dd_print("dump_dir_entry_offsets: %p", offsets);
 
-	dd_print("\t\toffsets->name.block_on_devide: %u",
-		 offsets->name.block_on_devide);
+	dd_print("\t\toffsets->name.block_on_device: %u",
+		 offsets->name.block_on_device);
 	dd_print("\t\toffsets->name.offset_on_block: %u",
 		 offsets->name.offset_on_block);
 
-	dd_print("\t\toffsets->attributes.block_on_devide: %u",
-		 offsets->attributes.block_on_devide);
+	dd_print("\t\toffsets->attributes.block_on_device: %u",
+		 offsets->attributes.block_on_device);
 	dd_print("\t\toffsets->attributes.offset_on_block: %u",
 		 offsets->attributes.offset_on_block);
 
-	dd_print("\t\toffsets->size.block_on_devide: %u",
-		 offsets->size.block_on_devide);
+	dd_print("\t\toffsets->size.block_on_device: %u",
+		 offsets->size.block_on_device);
 	dd_print("\t\toffsets->size.offset_on_block: %u",
 		 offsets->size.offset_on_block);
 
-	dd_print("\t\toffsets->first_cluster.block_on_devide: %u",
-		 offsets->first_cluster.block_on_devide);
+	dd_print("\t\toffsets->first_cluster.block_on_device: %u",
+		 offsets->first_cluster.block_on_device);
 	dd_print("\t\toffsets->first_cluster.offset_on_block: %u",
 		 offsets->first_cluster.offset_on_block);
 }
@@ -270,10 +270,10 @@ struct dir_entry_ptrs {
 	} first_cluster;
 };
 
-void dump_dir_entry_ptrs(struct dir_entry_ptrs *ptrs)
+void dump_dir_entry_ptrs(const struct dir_entry_ptrs *ptrs)
 {
 	dd_print("dump_dir_entry_ptrs: %p", ptrs);
-	dd_print("\t\tptrs->error: %dl", ptrs->error);
+	dd_print("\t\tptrs->error: %ld", ptrs->error);
 	dd_print("\t\tptrs->name.ptr: %p", ptrs->name.ptr);
 	dd_print("\t\tptrs->name.bh: %p", ptrs->name.bh);
 
@@ -1121,14 +1121,14 @@ out:
 static int ddfs_create(struct inode *dir, struct dentry *dentry, umode_t mode,
 		       bool excl)
 {
-	dd_print("ddfs_create, inode: %p, dentry: %p, mode: %u, excl: %d", dir,
-		 dentry, mode, (int)excl);
-
 	struct super_block *sb = dir->i_sb;
 	struct ddfs_sb_info *sbi = DDFS_SB(sb);
 	struct inode *inode;
 	int err;
 	struct ddfs_dir_entry de;
+
+	dd_print("ddfs_create, inode: %p, dentry: %p, mode: %u, excl: %d", dir,
+		 dentry, mode, (int)excl);
 
 	lock_data(sbi);
 
@@ -1169,6 +1169,7 @@ out:
 static int ddfs_find(struct inode *dir, const char *name,
 		     struct ddfs_dir_entry *dest_de)
 {
+	int entry_index;
 	struct ddfs_inode_info *dd_dir = DDFS_I(dir);
 
 	dd_print("ddfs_find, dir: %p, name: %s, dest_de: %p", dir, name,
@@ -1180,16 +1181,15 @@ static int ddfs_find(struct inode *dir, const char *name,
 	// 	return -ENOENT;
 	// }
 
-	int entry_index;
 	for (entry_index = 0; entry_index < dd_dir->number_of_entries;
 	     ++entry_index) {
+		int i;
 		const struct dir_entry_ptrs entry_ptrs =
 			access_dir_entries(dir, entry_index, DDFS_PART_NAME);
 
 		dd_print("entry_index: %d", entry_index);
 		dump_dir_entry_ptrs(&entry_ptrs);
 
-		int i;
 		for (i = 0; i < 4; ++i) {
 			if (entry_ptrs.name.ptr[i] == name[i] &&
 			    entry_ptrs.name.ptr[i] == '\0') {
