@@ -1604,8 +1604,8 @@ static const struct dentry_operations ddfs_dentry_ops = {
 };
 
 struct ddfs_boot_sector {
-	__u16 sector_size;
-	__u8 sectors_per_cluster;
+	__u32 sector_size;
+	__u32 sectors_per_cluster;
 	__u32 number_of_clusters;
 };
 
@@ -1621,8 +1621,9 @@ long ddfs_read_boot_sector(struct super_block *sb, void *data,
 void log_boot_sector(struct ddfs_boot_sector *boot_sector)
 {
 	dd_print("sector_size: %u, s/c: %u, number_of_clusters: %u",
-		 boot_sector->sector_size, boot_sector->sectors_per_cluster,
-		 boot_sector->number_of_clusters);
+		 (unsigned)boot_sector->sector_size,
+		 (unsigned)boot_sector->sectors_per_cluster,
+		 (unsigned)boot_sector->number_of_clusters);
 }
 
 unsigned int calculate_data_offset(struct ddfs_sb_info *sbi)
@@ -1646,12 +1647,12 @@ static int ddfs_fill_super(struct super_block *sb, void *data, int silent)
 	struct buffer_head *bh;
 	struct ddfs_boot_sector boot_sector;
 
-	dd_print("init_ddfs_fs");
+	dd_print("ddfs_fill_super");
 
 	sbi = kzalloc(sizeof(struct ddfs_sb_info), GFP_KERNEL);
 	if (!sbi) {
 		dd_error("kzalloc of sbi failed");
-		dd_print("~init_ddfs_fs");
+		dd_print("~ddfs_fill_super %d", -ENOMEM);
 		return -ENOMEM;
 	}
 	sb->s_fs_info = sbi;
@@ -1715,14 +1716,14 @@ static int ddfs_fill_super(struct super_block *sb, void *data, int silent)
 		sbi->size_entries_offset +
 		sbi->entries_per_cluster * sizeof(DDFS_DIR_ENTRY_SIZE_TYPE);
 
-	dd_print("~init_ddfs_fs");
+	dd_print("~ddfs_fill_super 0");
 
 	return 0;
 
 out_fail:
 	sb->s_fs_info = NULL;
 	kfree(sbi);
-	dd_print("~init_ddfs_fs");
+	dd_print("~ddfs_fill_super %d", error);
 	return error;
 }
 
