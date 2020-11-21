@@ -10,6 +10,11 @@
 #define DDFS_CLUSTER_UNUSED 0xfffffffe
 #define DDFS_CLUSTER_EOF 0xffffffff
 
+#define DDFS_PART_NAME 1
+#define DDFS_PART_ATTRIBUTES 2
+#define DDFS_PART_SIZE 4
+#define DDFS_PART_FIRST_CLUSTER 8
+
 #define dd_print(...)                                                          \
 	do {                                                                   \
 		printk(KERN_INFO "-------------------[DDFS]: " __VA_ARGS__);   \
@@ -187,6 +192,123 @@ struct dir_entry_offsets calc_dir_entry_offsets(struct inode *dir,
 			dir, entry_index, sbi->first_cluster_entries_offset,
 			sizeof(DDFS_DIR_ENTRY_FIRST_CLUSTER_TYPE))
 	};
+
+	return result;
+}
+
+struct dir_entry_ptrs {
+	long error;
+
+	struct {
+		DDFS_DIR_ENTRY_NAME_TYPE *ptr;
+		struct buffer_head *bh;
+	} name;
+
+	struct {
+		DDFS_DIR_ENTRY_ATTRIBUTES_TYPE *ptr;
+		struct buffer_head *bh;
+	} attributes;
+
+	struct {
+		DDFS_DIR_ENTRY_SIZE_TYPE *ptr;
+		struct buffer_head *bh;
+	} size;
+
+	struct {
+		DDFS_DIR_ENTRY_FIRST_CLUSTER_TYPE *ptr;
+		struct buffer_head *bh;
+	} first_cluster;
+};
+
+static inline struct dir_entry_ptrs
+access_dir_entries(struct inode *dir, unsigned entry_index, unsigned part_flags)
+{
+	const struct dir_entry_offsets offsets =
+		calc_dir_entry_offsets(dir, entry_index);
+	struct super_block *sb = dir->i_sb;
+	struct dir_entry_ptrs result;
+
+	struct buffer_head *hydra[4] = { NULL };
+	unsigned block_no[4] = { 0 };
+	unsigned counter = 0;
+
+	result.error = 0;
+
+	struct part_data {
+		unsigned flag;
+		const struct dir_entry_part_offsets *offsets;
+		struct buffer_head **dest_bh;
+		void **dest_ptr;
+	};
+
+	struct part_data parts_data[] = {
+		{ .flag = DDFS_PART_NAME,
+		  .offsets = &offsets.name,
+		  .dest_bh = &result.name.bh,
+		  .dest_ptr = &result.name.ptr },
+		{ .flag = DDFS_PART_ATTRIBUTES,
+		  .offsets = &offsets.attributes,
+		  .dest_bh = &result.attributes.bh,
+		  .dest_ptr = &result.attributes.ptr },
+		{ .flag = DDFS_PART_SIZE,
+		  .offsets = &offsets.size,
+		  .dest_bh = &result.size.bh,
+		  .dest_ptr = &result.size.ptr },
+		{ .flag = DDFS_PART_FIRST_CLUSTER,
+		  .offsets = &offsets.first_cluster,
+		  .dest_bh = &result.first_cluster.bh,
+		  .dest_ptr = &result.first_cluster.ptr }
+	};
+
+	unsigned number_of_parts = sizeof(parts_data) / sizeof(parts_data[0]);
+	int i;
+
+	for (i = 0; i < number_of_parts; ++i) {
+		struct part_data data = parts_data[i];
+
+		if (!(part_flags & data.flag)) {
+			*data.dest_bh = NULL;
+			continue;
+		}
+
+		int used_cached = 0;
+		int j;
+		for (j = 0; j < counter; ++j) {
+			if (block_no[j] != data.offsets->block_on_device) {
+				continue;
+			}
+
+			// The same block no as cached one. Reuse it.
+
+			used_cached = 1;
+			*data.dest_bh = hydra[j];
+			char *ptr = (char *)(hydra[j]->b_data) +
+				    data.offsets->offset_on_block;
+			*data.dest_ptr = ptr;
+			break;
+		}
+
+		if (used_cached) {
+			continue;
+		}
+
+		// No cached bh. Need to read
+		struct buffer_head *bh =
+			sb_bread(sb, data.offsets->block_on_device);
+		if (!bh) {
+			*data.dest_bh = NULL;
+			continue;
+		}
+
+		char *ptr =
+			(char *)(bh->b_data) + data.offsets->offset_on_block;
+		*data.dest_ptr = ptr;
+		*data.dest_bh = bh;
+
+		hydra[counter] = bh;
+		block_no[counter] = data.offsets->block_on_device;
+		++counter;
+	}
 
 	return result;
 }
@@ -746,9 +868,14 @@ static long ddfs_add_dir_entry(struct inode *dir, const struct qstr *qname)
 	const unsigned first_cluster_entry_offset_on_block =
 		first_cluster_offset_on_cluster % sb->block_size;
 
+	//////////////////
+
+	const struct dir_entry_offsets offsets =
+		calc_dir_entry_offsets(dir, new_entry_index);
+
 	lock_data(sbi);
 
-	bh = sb_bread(sb, new_entry_name_block_no_on_device);
+	bh = sb_bread(sb, offsets.name.block_on_device);
 	if (!bh) {
 		unlock_data(sbi);
 		--dd_idir->number_of_entries;
