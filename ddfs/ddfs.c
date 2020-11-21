@@ -1729,9 +1729,11 @@ out_fail:
 static struct dentry *ddfs_mount(struct file_system_type *fs_type, int flags,
 				 const char *dev_name, void *data)
 {
-	dd_print("init_ddfs_fs\n");
-	return mount_bdev(fs_type, flags, dev_name, data, ddfs_fill_super);
-	// return ERR_PTR(-EINVAL);
+	struct dentry *result;
+	dd_print("ddfs_mount");
+	result = mount_bdev(fs_type, flags, dev_name, data, ddfs_fill_super);
+	dd_print("~ddfs_mount: %p", result);
+	return result;
 }
 
 static struct file_system_type ddfs_fs_type = {
