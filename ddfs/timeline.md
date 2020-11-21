@@ -12,4 +12,6 @@ stop copypasting and try to do something alone, based on fat
 14:30 writing cpp program to manage image
 14:37 login gh
 2020-11-21 15:18:21 mounting with bs
+2020-11-21 17:54:47 mounting did not fuck up system for the first time \o/
+    and I can even rmmod ddfs ^^
 

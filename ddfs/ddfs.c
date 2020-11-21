@@ -5,6 +5,7 @@
 #include <linux/ctype.h>
 #include <linux/slab.h>
 #include <linux/namei.h>
+#include <linux/stat.h>
 #include <linux/kernel.h>
 #include <linux/iversion.h>
 #include <linux/writeback.h>
@@ -17,6 +18,11 @@
 #define DDFS_PART_ATTRIBUTES 2
 #define DDFS_PART_SIZE 4
 #define DDFS_PART_FIRST_CLUSTER 8
+
+#define DDFS_ROOT_INO 0
+
+#define DDFS_FILE_ATTR 1
+#define DDFS_DIR_ATTR 2
 
 #define dd_print(...)                                                          \
 	do {                                                                   \
@@ -67,8 +73,6 @@ struct ddfs_dir_entry {
 	unsigned entry_index;
 #define DDFS_DIR_ENTRY_NAME_CHARS_IN_PLACE 4
 	DDFS_DIR_ENTRY_NAME_TYPE name[DDFS_DIR_ENTRY_NAME_CHARS_IN_PLACE];
-#define DDFS_FILE_ATTR 1
-#define DDFS_DIR_ATTR 2
 	DDFS_DIR_ENTRY_ATTRIBUTES_TYPE attributes;
 	DDFS_DIR_ENTRY_SIZE_TYPE size;
 	DDFS_DIR_ENTRY_FIRST_CLUSTER_TYPE first_cluster;
@@ -89,6 +93,8 @@ struct ddfs_sb_info {
 	unsigned int data_offset; // From begin of partition
 	unsigned int data_cluster_no; // Data first cluster no
 
+	unsigned int root_cluster; //First cluster of root dir.
+
 	unsigned long block_size; // Size of block (sector) in bytes
 	unsigned int blocks_per_cluster; // Number of blocks (sectors) per cluster
 
@@ -102,6 +108,8 @@ struct ddfs_sb_info {
 	struct mutex table_lock;
 	struct mutex s_lock;
 	struct mutex build_inode_lock;
+
+	const void *dir_ops; /* Opaque; default directory operations */
 };
 
 static inline struct ddfs_sb_info *DDFS_SB(struct super_block *sb)
@@ -1578,6 +1586,16 @@ static const struct inode_operations ddfs_dir_inode_operations = {
 	// .update_time = ddfs_update_time,
 };
 
+const struct file_operations ddfs_dir_operations = {
+	.llseek = generic_file_llseek,
+	.read = generic_read_dir,
+	// .iterate_shared = fat_readdir,
+	// #ifdef CONFIG_COMPAT
+	// .compat_ioctl	= fat_compat_dir_ioctl,
+	// #endif
+	// .fsync		= fat_file_fsync,
+};
+
 static int ddfs_revalidate(struct dentry *dentry, unsigned int flags)
 {
 	// if (flags & LOOKUP_RCU)
@@ -1650,6 +1668,53 @@ unsigned int calculate_data_offset(struct ddfs_sb_info *sbi)
 	return first_data_cluster * sbi->cluster_size;
 }
 
+/* Convert attribute bits and a mask to the UNIX mode. */
+static inline umode_t ddfs_make_mode(struct ddfs_sb_info *sbi, u8 attrs,
+				     umode_t mode)
+{
+	if (attrs & DDFS_DIR_ATTR) {
+		// return (mode & ~sbi->options.fs_dmask) | S_IFDIR;
+		return S_IFDIR;
+	}
+
+	return 0;
+}
+
+static int ddfs_read_root(struct inode *inode)
+{
+	struct ddfs_sb_info *sbi = DDFS_SB(inode->i_sb);
+	struct ddfs_inode_info *dd_inode = DDFS_I(inode);
+
+	dd_print("ddfs_read_root %p", inode);
+
+	dd_inode->i_pos = DDFS_ROOT_INO;
+	// inode->i_uid = sbi->options.fs_uid;
+	// inode->i_gid = sbi->options.fs_gid;
+	inode_inc_iversion(inode);
+
+	inode->i_generation = 0;
+	inode->i_mode = ddfs_make_mode(sbi, DDFS_DIR_ATTR, S_IRWXUGO);
+	inode->i_op = sbi->dir_ops;
+	inode->i_fop = &ddfs_dir_operations;
+
+	dd_inode->i_start = sbi->root_cluster;
+
+	// Todo: handle root bigget than one cluster
+	inode->i_size = sbi->cluster_size;
+	inode->i_blocks = sbi->blocks_per_cluster;
+
+	dd_inode->i_logstart = 0;
+	dd_inode->mmu_private = inode->i_size;
+
+	dd_inode->i_attrs |= DDFS_DIR_ATTR;
+
+	// inode->i_mtime.tv_sec = inode->i_atime.tv_sec = inode->i_ctime.tv_sec =0;
+	// inode->i_mtime.tv_nsec = inode->i_atime.tv_nsec =inode->i_ctime.tv_nsec = 0;
+	// set_nlink(inode, fat_subdirs(inode) + 2);
+
+	return 0;
+}
+
 static int ddfs_fill_super(struct super_block *sb, void *data, int silent)
 {
 	struct ddfs_sb_info *sbi;
@@ -1711,6 +1776,7 @@ static int ddfs_fill_super(struct super_block *sb, void *data, int silent)
 		boot_sector.number_of_clusters * sizeof(struct ddfs_dir_entry);
 	sbi->data_offset = calculate_data_offset(sbi);
 	sbi->data_cluster_no = sbi->data_offset / sbi->cluster_size;
+	sbi->root_cluster = sbi->data_cluster_no;
 	sbi->block_size = sb->s_blocksize;
 
 	sbi->entries_per_cluster =
@@ -1739,6 +1805,14 @@ static int ddfs_fill_super(struct super_block *sb, void *data, int silent)
 	root_inode->i_ino = 1;
 	dd_print("calling inode_set_iversion(root_inode, 1)");
 	inode_set_iversion(root_inode, 1);
+
+	dd_print("calling ddfs_read_root");
+	error = ddfs_read_root(root_inode);
+	if (error) {
+		dd_print("ddfs_read_root failed with: %ld", error);
+		goto out_fail;
+	}
+
 	sb->s_root = d_make_root(root_inode);
 	if (!sb->s_root) {
 		dd_print("d_make_root root inode failed");
