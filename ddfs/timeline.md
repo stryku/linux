@@ -16,5 +16,6 @@ stop copypasting and try to do something alone, based on fat
     and I can even rmmod ddfs ^^
 
 2020-11-21 19:36:19 mounted for the first time without error
+2020-11-21 21:12:09 mounted for real. Can cd there lol
 
 
