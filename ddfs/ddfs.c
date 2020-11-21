@@ -992,6 +992,49 @@ out:
 	return err;
 }
 
+static int ddfs_find(struct inode *dir, const struct qstr *qname,
+		     struct ddfs_dir_entry *dest_de)
+{
+	struct ddfs_inode_info *dd_dir = DDFS_I(dir);
+	const unsigned int len = vfat_striptail_len(qname);
+	if (len == 0 || len > 4) {
+		return -ENOENT;
+	}
+
+	int entry_index;
+	for (entry_index = 0; entry_index < dd_dir->number_of_entries;
+	     ++entry_index) {
+		const struct dir_entry_ptrs entry_ptrs =
+			access_dir_entries(dir, entry_index, DDFS_PART_NAME);
+
+		int i;
+		for (i = 0; i < 4; ++i) {
+			if (entry_ptrs.name.ptr[i] == qname->name[i] &&
+			    !entry_ptrs.name.ptr[i]) {
+				memcpy(dest_de->name, entry_ptrs.name.ptr, i);
+				dest_de->entry_index = entry_index;
+				dest_de->size = *entry_ptrs.size.ptr;
+				dest_de->first_cluster =
+					*entry_ptrs.first_cluster.ptr;
+				dest_de->attributes =
+					*entry_ptrs.attributes.ptr;
+
+				release_dir_entries(&entry_ptrs,
+						    DDFS_PART_NAME);
+				return 0;
+			}
+
+			if (!entry_ptrs.name.ptr[i] || !qname->name[i]) {
+				break;
+			}
+		}
+
+		release_dir_entries(&entry_ptrs, DDFS_PART_NAME);
+	}
+
+	return -ENOENT;
+}
+
 static struct dentry *ddfs_lookup(struct inode *dir, struct dentry *dentry,
 				  unsigned int flags)
 {
@@ -1013,7 +1056,7 @@ static struct dentry *ddfs_lookup(struct inode *dir, struct dentry *dentry,
 		goto error;
 	}
 
-	inode = fat_build_inode(sb, sinfo.de, sinfo.i_pos);
+	inode = ddfs_build_inode(sb, sinfo.de, sinfo.i_pos);
 	brelse(sinfo.bh);
 	if (IS_ERR(inode)) {
 		err = PTR_ERR(inode);
