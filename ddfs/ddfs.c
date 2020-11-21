@@ -7,6 +7,8 @@
 #include <linux/iversion.h>
 
 #define DDFS_SUPER_MAGIC 0xddf5
+#define DDFS_CLUSTER_UNUSED 0xfffffffe
+#define DDFS_CLUSTER_EOF 0xffffffff
 
 #define dd_print(...)                                                          \
 	do {                                                                   \
@@ -84,6 +86,8 @@ struct ddfs_sb_info {
 	unsigned int attributes_entries_offset;
 	unsigned int size_entries_offset;
 	unsigned int first_cluster_entries_offset;
+
+	struct mutex table_lock;
 };
 
 static inline struct ddfs_sb_info *DDFS_SB(struct super_block *sb)
@@ -188,7 +192,8 @@ retry:
 	bh = sb_bread(sb, blocknr);
 	if (!bh) {
 		dd_error("unable to read inode block for updating (i_pos %lld)",
-			 i_pos) return -EIO;
+			 i_pos);
+		return -EIO;
 	}
 
 	// Todo: do we need it?
@@ -206,20 +211,20 @@ retry:
 		sbi->first_cluster_entries_offset +
 		DDFS_I(inode)->entry_index *
 			sizeof(DDFS_DIR_ENTRY_FIRST_CLUSTER_TYPE);
-	*((__u32)(bh->b_data + size_offset)) = DDFS_I(inode)->i_logstart;
+	*((__u32 *)(bh->b_data + size_offset)) = DDFS_I(inode)->i_logstart;
 
 	// Write size
 	const unsigned size_offset =
 		sbi->size_entries_offset +
 		DDFS_I(inode)->entry_index * sizeof(DDFS_DIR_ENTRY_SIZE_TYPE);
-	*((__u32)(bh->b_data + size_offset)) = inode->i_size;
+	*((__u32 *)(bh->b_data + size_offset)) = inode->i_size;
 
 	// Write dummy attributes
 	const unsigned attributes_offset =
 		sbi->attributes_entries_offset +
 		DDFS_I(inode)->entry_index *
 			sizeof(DDFS_DIR_ENTRY_ATTRIBUTES_TYPE);
-	*((__u8)(bh->b_data + size_offset)) = DDFS_FILE_ATTR;
+	*((__u8 *)(bh->b_data + size_offset)) = DDFS_FILE_ATTR;
 
 	/////////////////////////////////////////
 	// raw_entry = &((struct ddfs_dir_entry *)(bh->b_data))[offset];
@@ -248,6 +253,108 @@ static int ddfs_write_inode(struct inode *inode, struct writeback_control *wbc)
 	return __ddfs_write_inode(inode, wbc->sync_mode == WB_SYNC_ALL);
 }
 
+int ddfs_sync_inode(struct inode *inode)
+{
+	return __ddfs_write_inode(inode, 1);
+}
+
+static inline void lock_table(struct ddfs_sb_info *sbi)
+{
+	mutex_lock(&sbi->table_lock);
+}
+
+static inline void unlock_table(struct ddfs_sb_info *sbi)
+{
+	mutex_unlock(&sbi->table_lock);
+}
+
+static inline void table_write_cluster(struct ddfs_sb_info *sbi,
+				       unsigned cluster_no,
+				       unsigned cluster_value)
+{
+}
+
+/* Free all clusters after the skip'th cluster. */
+static int ddfs_free(struct inode *inode, int skip)
+{
+	struct super_block *sb = inode->i_sb;
+	struct ddfs_sb_info *sbi = DDFS_SB(sb);
+	int err, wait, free_start, i_start, i_logstart;
+	struct ddfs_inode_info *dd_inode = DDFS_I(inode);
+	struct buffer_head *bh;
+
+	if (dd_inode->i_start == 0)
+		return 0;
+
+	// fat_cache_inval_inode(inode);
+
+	wait = IS_DIRSYNC(inode);
+	i_start = free_start = dd_inode->i_start;
+	i_logstart = dd_inode->i_logstart;
+
+	/* First, we write the new file size. */
+	if (!skip) {
+		dd_inode->i_start = 0;
+		dd_inode->i_logstart = 0;
+	}
+	dd_inode->i_attrs |= ATTR_ARCH;
+	// fat_truncate_time(inode, NULL, S_CTIME | S_MTIME);
+	if (wait) {
+		err = ddfs_sync_inode(inode);
+		if (err) {
+			dd_inode->i_start = i_start;
+			dd_inode->i_logstart = i_logstart;
+			return err;
+		}
+	} else {
+		mark_inode_dirty(inode);
+	}
+
+	inode->i_blocks = 0;
+
+	// Index of cluster entry in table.
+	const unsigned cluster_no = dd_inode->i_logstart;
+	// How many cluster indices fit in one cluster, in table.
+	const unsigned cluster_idx_per_cluster = sbi->cluster_size / 4u;
+	// Cluster of table on which `cluster_no` lays.
+	const unsigned table_cluster_no_containing_cluster_no =
+		cluster_no / cluster_idx_per_cluster;
+	// Index of block on the cluster, on which `cluster_no` lays.
+	const unsigned block_no_containing_cluster_no =
+		(cluster_no % cluster_idx_per_cluster) / sb->sec_per_clus;
+	// Index of block on device, on which `cluster_no` lays.
+	// Calculated:
+	//    1 cluster for boot sector * sec_per_clus
+	//    + table_cluster_no_containing_cluster_no * sec_per_clus
+	//    +  block_no_containing_cluster_no
+	const unsigned device_block_no_containing_cluster_no =
+		sb->sec_per_clus +
+		table_cluster_no_containing_cluster_no * sb->sec_per_clus +
+		block_no_containing_cluster_no;
+	// Cluster index on the block
+	const unsigned cluster_idx_on_block =
+		cluster_no % (sb->s_blocksize / 4u);
+
+	lock_table(sbi);
+
+	// Read the block
+	bh = sb_bread(sb, device_block_no_containing_cluster_no);
+	if (!bh) {
+		dd_error("unable to read inode block for updating (i_pos %lld)",
+			 i_pos);
+		return -EIO;
+	}
+
+	__u32 *cluster_index_ptr = (__u32 *)(bh->b_data) + cluster_idx_on_block;
+
+	// Finally, write cluster as unused:
+	*cluster_index_ptr = DDFS_CLUSTER_UNUSED;
+
+	unlock_table(sbi);
+
+	return 0;
+}
+
 void ddfs_truncate_blocks(struct inode *inode, loff_t offset)
 {
 	struct ddfs_sb_info *sbi = DDFS_SB(inode->i_sb);
@@ -269,16 +376,20 @@ void ddfs_truncate_blocks(struct inode *inode, loff_t offset)
 static void ddfs_evict_inode(struct inode *inode)
 {
 	truncate_inode_pages_final(&inode->i_data);
-	if (!inode->i_nlink) {
-		inode->i_size = 0;
-		fat_truncate_blocks(inode, 0);
-	} else
-		fat_free_eofblocks(inode);
+
+	fat_truncate_blocks(inode, 0);
+
+	// if (!inode->i_nlink) {
+	// 	inode->i_size = 0;
+	// 	fat_truncate_blocks(inode, 0);
+	// } else {
+	// 	fat_free_eofblocks(inode);
+	// }
 
 	invalidate_inode_buffers(inode);
 	clear_inode(inode);
-	fat_cache_inval_inode(inode);
-	fat_detach(inode);
+	// fat_cache_inval_inode(inode);
+	// fat_detach(inode);
 }
 
 static void ddfs_put_super(struct super_block *sb)
