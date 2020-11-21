@@ -1657,134 +1657,151 @@ static int ddfs_rename(struct inode *old_dir, struct dentry *old_dentry,
 	// 	goto out;
 }
 
-// Todo: Should implement?
-// int ddfs_setattr(struct dentry *dentry, struct iattr *attr)
-// {
-// 	struct msdos_sb_info *sbi = MSDOS_SB(dentry->d_sb);
-// 	struct inode *inode = d_inode(dentry);
-// 	unsigned int ia_valid;
-// 	int error;
+int ddfs_setattr(struct dentry *dentry, struct iattr *attr)
+{
+	struct inode *inode = d_inode(dentry);
+	dd_print("ddfs_setattr, dentry: %p, iattr: %p", dentry, attr);
+	dump_ddfs_inode_info(DDFS_I(inode));
 
-// 	/* Check for setting the inode time. */
-// 	ia_valid = attr->ia_valid;
-// 	if (ia_valid & TIMES_SET_FLAGS) {
-// 		if (fat_allow_set_time(sbi, inode))
-// 			attr->ia_valid &= ~TIMES_SET_FLAGS;
-// 	}
+	dd_print("~ddfs_setattr 0");
+	return 0;
+	// 	struct msdos_sb_info *sbi = MSDOS_SB(dentry->d_sb);
+	// 	struct inode *inode = d_inode(dentry);
+	// 	unsigned int ia_valid;
+	// 	int error;
 
-// 	error = setattr_prepare(dentry, attr);
-// 	attr->ia_valid = ia_valid;
-// 	if (error) {
-// 		if (sbi->options.quiet)
-// 			error = 0;
-// 		goto out;
-// 	}
+	// 	/* Check for setting the inode time. */
+	// 	ia_valid = attr->ia_valid;
+	// 	if (ia_valid & TIMES_SET_FLAGS) {
+	// 		if (fat_allow_set_time(sbi, inode))
+	// 			attr->ia_valid &= ~TIMES_SET_FLAGS;
+	// 	}
 
-// 	/*
-// 	 * Expand the file. Since inode_setattr() updates ->i_size
-// 	 * before calling the ->truncate(), but FAT needs to fill the
-// 	 * hole before it. XXX: this is no longer true with new truncate
-// 	 * sequence.
-// 	 */
-// 	if (attr->ia_valid & ATTR_SIZE) {
-// 		inode_dio_wait(inode);
+	// 	error = setattr_prepare(dentry, attr);
+	// 	attr->ia_valid = ia_valid;
+	// 	if (error) {
+	// 		if (sbi->options.quiet)
+	// 			error = 0;
+	// 		goto out;
+	// 	}
 
-// 		if (attr->ia_size > inode->i_size) {
-// 			error = fat_cont_expand(inode, attr->ia_size);
-// 			if (error || attr->ia_valid == ATTR_SIZE)
-// 				goto out;
-// 			attr->ia_valid &= ~ATTR_SIZE;
-// 		}
-// 	}
+	// 	/*
+	// 	 * Expand the file. Since inode_setattr() updates ->i_size
+	// 	 * before calling the ->truncate(), but FAT needs to fill the
+	// 	 * hole before it. XXX: this is no longer true with new truncate
+	// 	 * sequence.
+	// 	 */
+	// 	if (attr->ia_valid & ATTR_SIZE) {
+	// 		inode_dio_wait(inode);
 
-// 	if (((attr->ia_valid & ATTR_UID) &&
-// 	     (!uid_eq(attr->ia_uid, sbi->options.fs_uid))) ||
-// 	    ((attr->ia_valid & ATTR_GID) &&
-// 	     (!gid_eq(attr->ia_gid, sbi->options.fs_gid))) ||
-// 	    ((attr->ia_valid & ATTR_MODE) && (attr->ia_mode & ~FAT_VALID_MODE)))
-// 		error = -EPERM;
+	// 		if (attr->ia_size > inode->i_size) {
+	// 			error = fat_cont_expand(inode, attr->ia_size);
+	// 			if (error || attr->ia_valid == ATTR_SIZE)
+	// 				goto out;
+	// 			attr->ia_valid &= ~ATTR_SIZE;
+	// 		}
+	// 	}
 
-// 	if (error) {
-// 		if (sbi->options.quiet)
-// 			error = 0;
-// 		goto out;
-// 	}
+	// 	if (((attr->ia_valid & ATTR_UID) &&
+	// 	     (!uid_eq(attr->ia_uid, sbi->options.fs_uid))) ||
+	// 	    ((attr->ia_valid & ATTR_GID) &&
+	// 	     (!gid_eq(attr->ia_gid, sbi->options.fs_gid))) ||
+	// 	    ((attr->ia_valid & ATTR_MODE) && (attr->ia_mode & ~FAT_VALID_MODE)))
+	// 		error = -EPERM;
 
-// 	/*
-// 	 * We don't return -EPERM here. Yes, strange, but this is too
-// 	 * old behavior.
-// 	 */
-// 	if (attr->ia_valid & ATTR_MODE) {
-// 		if (fat_sanitize_mode(sbi, inode, &attr->ia_mode) < 0)
-// 			attr->ia_valid &= ~ATTR_MODE;
-// 	}
+	// 	if (error) {
+	// 		if (sbi->options.quiet)
+	// 			error = 0;
+	// 		goto out;
+	// 	}
 
-// 	if (attr->ia_valid & ATTR_SIZE) {
-// 		error = fat_block_truncate_page(inode, attr->ia_size);
-// 		if (error)
-// 			goto out;
-// 		down_write(&MSDOS_I(inode)->truncate_lock);
-// 		truncate_setsize(inode, attr->ia_size);
-// 		fat_truncate_blocks(inode, attr->ia_size);
-// 		up_write(&MSDOS_I(inode)->truncate_lock);
-// 	}
+	// 	/*
+	// 	 * We don't return -EPERM here. Yes, strange, but this is too
+	// 	 * old behavior.
+	// 	 */
+	// 	if (attr->ia_valid & ATTR_MODE) {
+	// 		if (fat_sanitize_mode(sbi, inode, &attr->ia_mode) < 0)
+	// 			attr->ia_valid &= ~ATTR_MODE;
+	// 	}
 
-// 	/*
-// 	 * setattr_copy can't truncate these appropriately, so we'll
-// 	 * copy them ourselves
-// 	 */
-// 	if (attr->ia_valid & ATTR_ATIME)
-// 		fat_truncate_time(inode, &attr->ia_atime, S_ATIME);
-// 	if (attr->ia_valid & ATTR_CTIME)
-// 		fat_truncate_time(inode, &attr->ia_ctime, S_CTIME);
-// 	if (attr->ia_valid & ATTR_MTIME)
-// 		fat_truncate_time(inode, &attr->ia_mtime, S_MTIME);
-// 	attr->ia_valid &= ~(ATTR_ATIME | ATTR_CTIME | ATTR_MTIME);
+	// 	if (attr->ia_valid & ATTR_SIZE) {
+	// 		error = fat_block_truncate_page(inode, attr->ia_size);
+	// 		if (error)
+	// 			goto out;
+	// 		down_write(&MSDOS_I(inode)->truncate_lock);
+	// 		truncate_setsize(inode, attr->ia_size);
+	// 		fat_truncate_blocks(inode, attr->ia_size);
+	// 		up_write(&MSDOS_I(inode)->truncate_lock);
+	// 	}
 
-// 	setattr_copy(inode, attr);
-// 	mark_inode_dirty(inode);
-// out:
-// 	return error;
-// }
+	// 	/*
+	// 	 * setattr_copy can't truncate these appropriately, so we'll
+	// 	 * copy them ourselves
+	// 	 */
+	// 	if (attr->ia_valid & ATTR_ATIME)
+	// 		fat_truncate_time(inode, &attr->ia_atime, S_ATIME);
+	// 	if (attr->ia_valid & ATTR_CTIME)
+	// 		fat_truncate_time(inode, &attr->ia_ctime, S_CTIME);
+	// 	if (attr->ia_valid & ATTR_MTIME)
+	// 		fat_truncate_time(inode, &attr->ia_mtime, S_MTIME);
+	// 	attr->ia_valid &= ~(ATTR_ATIME | ATTR_CTIME | ATTR_MTIME);
+
+	// 	setattr_copy(inode, attr);
+	// 	mark_inode_dirty(inode);
+	// out:
+	// return error;
+}
 // EXPORT_SYMBOL_GPL(ddfs_setattr);
 
-// Todo: Should implement?
-// int ddfs_getattr(const struct path *path, struct kstat *stat, u32 request_mask,
-// 		 unsigned int flags)
-// {
-// 	struct inode *inode = d_inode(path->dentry);
-// 	generic_fillattr(inode, stat);
-// 	stat->blksize = MSDOS_SB(inode->i_sb)->cluster_size;
+int ddfs_getattr(const struct path *path, struct kstat *stat, u32 request_mask,
+		 unsigned int flags)
+{
+	struct inode *inode = d_inode(path->dentry);
 
-// 	if (MSDOS_SB(inode->i_sb)->options.nfs == FAT_NFS_NOSTALE_RO) {
-// 		/* Use i_pos for ino. This is used as fileid of nfs. */
-// 		stat->ino = fat_i_pos_read(MSDOS_SB(inode->i_sb), inode);
-// 	}
-// 	return 0;
-// }
+	dd_print("ddfs_getattr, inode: %p, request_mask: %u, flags: %u", inode,
+		 request_mask, flags);
+	dump_ddfs_inode_info(DDFS_I(inode));
+
+	dd_print("~ddfs_getattr 0");
+	return 0;
+
+	// struct inode *inode = d_inode(path->dentry);
+	// generic_fillattr(inode, stat);
+	// stat->blksize = MSDOS_SB(inode->i_sb)->cluster_size;
+
+	// if (MSDOS_SB(inode->i_sb)->options.nfs == FAT_NFS_NOSTALE_RO) {
+	// 	/* Use i_pos for ino. This is used as fileid of nfs. */
+	// 	stat->ino = fat_i_pos_read(MSDOS_SB(inode->i_sb), inode);
+	// }
+	// return 0;
+}
 // EXPORT_SYMBOL_GPL(ddfs_getattr);
 
-// Todo: should implement?
-// int ddfs_update_time(struct inode *inode, struct timespec64 *now, int flags)
-// {
-// 	int iflags = I_DIRTY_TIME;
-// 	bool dirty = false;
+int ddfs_update_time(struct inode *inode, struct timespec64 *now, int flags)
+{
+	dd_print("ddfs_update_time inode: %p, timespec: %p, flags: %d", inode,
+		 now, flags);
+	dump_ddfs_inode_info(DDFS_I(inode));
 
-// 	if (inode->i_ino == MSDOS_ROOT_INO)
-// 		return 0;
+	// int iflags = I_DIRTY_TIME;
+	// bool dirty = false;
 
-// 	fat_truncate_time(inode, now, flags);
-// 	if (flags & S_VERSION)
-// 		dirty = inode_maybe_inc_iversion(inode, false);
-// 	if ((flags & (S_ATIME | S_CTIME | S_MTIME)) &&
-// 	    !(inode->i_sb->s_flags & SB_LAZYTIME))
-// 		dirty = true;
+	// if (inode->i_ino == MSDOS_ROOT_INO)
+	// 	return 0;
 
-// 	if (dirty)
-// 		iflags |= I_DIRTY_SYNC;
-// 	__mark_inode_dirty(inode, iflags);
-// 	return 0;
-// }
+	// fat_truncate_time(inode, now, flags);
+	// if (flags & S_VERSION)
+	// 	dirty = inode_maybe_inc_iversion(inode, false);
+	// if ((flags & (S_ATIME | S_CTIME | S_MTIME)) &&
+	//     !(inode->i_sb->s_flags & SB_LAZYTIME))
+	// 	dirty = true;
+
+	// if (dirty)
+	// 	iflags |= I_DIRTY_SYNC;
+	// __mark_inode_dirty(inode, iflags);
+	dd_print("~ddfs_update_time 0");
+	return 0;
+}
 // EXPORT_SYMBOL_GPL(ddfs_update_time);
 
 static const struct inode_operations ddfs_dir_inode_operations = {
@@ -1794,9 +1811,9 @@ static const struct inode_operations ddfs_dir_inode_operations = {
 	.mkdir = ddfs_mkdir,
 	.rmdir = ddfs_rmdir,
 	.rename = ddfs_rename,
-	// .setattr = ddfs_setattr,
-	// .getattr = ddfs_getattr,
-	// .update_time = ddfs_update_time,
+	.setattr = ddfs_setattr,
+	.getattr = ddfs_getattr,
+	.update_time = ddfs_update_time,
 };
 
 const struct file_operations ddfs_dir_operations = {
