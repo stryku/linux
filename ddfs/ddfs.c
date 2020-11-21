@@ -1288,6 +1288,10 @@ error:
 
 static int ddfs_unlink(struct inode *dir, struct dentry *dentry)
 {
+	dd_print("ddfs_unlink: dir: %p, dentry: %p", dir, dentry);
+	dump_ddfs_inode_info(DDFS_I(dir));
+
+	dd_print("~ddfs_unlink %d", -EINVAL);
 	return -EINVAL;
 	////
 
@@ -1317,6 +1321,11 @@ static int ddfs_unlink(struct inode *dir, struct dentry *dentry)
 
 static int ddfs_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
 {
+	dd_print("ddfs_mkdir: dir: %p, dentry: %p, mode: %u", dir, dentry,
+		 mode);
+	dump_ddfs_inode_info(DDFS_I(dir));
+
+	dd_print("~ddfs_mkdir %d", -EINVAL);
 	return -EINVAL;
 
 	// 	struct super_block *sb = dir->i_sb;
@@ -1365,6 +1374,10 @@ static int ddfs_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
 
 static int ddfs_rmdir(struct inode *dir, struct dentry *dentry)
 {
+	dd_print("ddfs_rmdir: dir: %p, dentry: %p", dir, dentry);
+	dump_ddfs_inode_info(DDFS_I(dir));
+
+	dd_print("~ddfs_rmdir %d", -EINVAL);
 	return -EINVAL;
 
 	// 	struct inode *inode = d_inode(dentry);
@@ -1400,6 +1413,16 @@ static int ddfs_rename(struct inode *old_dir, struct dentry *old_dentry,
 		       struct inode *new_dir, struct dentry *new_dentry,
 		       unsigned int flags)
 {
+	dd_print(
+		"ddfs_rename: old_dir: %p, old_dentry: %p, new_dir: %p, new_dentry: %p, flags: %u",
+		old_dir, old_dentry, new_dir, new_dentry, flags);
+	dd_print("old_dir");
+	dump_ddfs_inode_info(DDFS_I(old_dir));
+	dd_print("new_dir");
+	dump_ddfs_inode_info(DDFS_I(new_dir));
+
+	dd_print("~ddfs_rename %d", -EINVAL);
+	return -EINVAL;
 	return -EINVAL;
 
 	// 	struct buffer_head *dotdot_bh;
@@ -1684,6 +1707,7 @@ const struct file_operations ddfs_dir_operations = {
 
 static int ddfs_revalidate(struct dentry *dentry, unsigned int flags)
 {
+	dd_print("ddfs_revalidate: dentry: %p, flags: %u", dentry, flags);
 	// if (flags & LOOKUP_RCU)
 	// 	return -ECHILD;
 
@@ -1693,6 +1717,7 @@ static int ddfs_revalidate(struct dentry *dentry, unsigned int flags)
 	// return vfat_revalidate_shortname(dentry);
 
 	// Todo: probably should be handled
+	dd_print("~ddfs_revalidate 0");
 	return 0;
 }
 
@@ -1728,7 +1753,7 @@ long ddfs_read_boot_sector(struct super_block *sb, void *data,
 {
 	dd_print("ddfs_read_boot_sector");
 	memcpy(boot_sector, data, sizeof(struct ddfs_boot_sector));
-	dd_print("~ddfs_read_boot_sector");
+	dd_print("~ddfs_read_boot_sector 0");
 	return 0;
 }
 
@@ -1793,6 +1818,9 @@ static int ddfs_read_root(struct inode *inode)
 	dd_inode->mmu_private = inode->i_size;
 
 	dd_inode->i_attrs |= DDFS_DIR_ATTR;
+
+	dd_print("set up root:");
+	dump_ddfs_inode_info(dd_inode);
 
 	// inode->i_mtime.tv_sec = inode->i_atime.tv_sec = inode->i_ctime.tv_sec =0;
 	// inode->i_mtime.tv_nsec = inode->i_atime.tv_nsec =inode->i_ctime.tv_nsec = 0;
