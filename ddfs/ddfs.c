@@ -1173,9 +1173,9 @@ static int ddfs_find(struct inode *dir, const char *name,
 {
 	int entry_index;
 	struct ddfs_inode_info *dd_dir = DDFS_I(dir);
-	char name_buf[] = { name[0], name[1], name[2], name[3], '\0' };
+	// char name_buf[] = { name[0], name[1], name[2], name[3], '\0' };
 
-	dd_print("ddfs_find, dir: %p, name: %s, dest_de: %p", dir, name_buf,
+	dd_print("ddfs_find, dir: %p, name: %s, dest_de: %p", dir, name,
 		 dest_de);
 
 	dump_ddfs_inode_info(dd_dir);
