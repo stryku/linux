@@ -1816,6 +1816,10 @@ static int ddfs_fill_super(struct super_block *sb, void *data, int silent)
 	}
 	dd_print("ddfs_read_root succeed");
 
+	dd_print("calling insert_inode_hash");
+	insert_inode_hash(root_inode);
+	dd_print("insert_inode_hash call succeed");
+
 	sb->s_root = d_make_root(root_inode);
 	if (!sb->s_root) {
 		dd_print("d_make_root root inode failed");
