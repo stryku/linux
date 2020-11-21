@@ -1068,6 +1068,9 @@ out:
 static int ddfs_create(struct inode *dir, struct dentry *dentry, umode_t mode,
 		       bool excl)
 {
+	dd_print("ddfs_create, inode: %p, dentry: %p, mode: %u, excl: %d", dir,
+		 dentry, mode, (int)excl);
+
 	struct super_block *sb = dir->i_sb;
 	struct ddfs_sb_info *sbi = DDFS_SB(sb);
 	struct inode *inode;
@@ -1078,24 +1081,35 @@ static int ddfs_create(struct inode *dir, struct dentry *dentry, umode_t mode,
 
 	// ts = current_time(dir);
 	// err = vfat_add_entry(dir, &dentry->d_name, 0, 0, &ts, &slot_info);
+	dd_print("calling ddfs_add_dir_entry");
 	err = ddfs_add_dir_entry(dir, &dentry->d_name, &de);
 	if (err) {
+		dd_print("ddfs_add_dir_entry failed with err: %d", err);
 		goto out;
 	}
+	dd_print("ddfs_add_dir_entry succeed");
+
 	inode_inc_iversion(dir);
 
+	dd_print("calling ddfs_build_inode");
 	inode = ddfs_build_inode(sb, &de);
 	if (IS_ERR(inode)) {
+		dd_print("ddfs_build_inode call failed");
 		err = PTR_ERR(inode);
 		goto out;
 	}
+	dd_print("ddfs_build_inode call succeed");
+
 	inode_inc_iversion(inode);
 	// fat_truncate_time(inode, &ts, S_ATIME | S_CTIME | S_MTIME);
 	/* timestamp is already written, so mark_inode_dirty() is unneeded. */
 
+	dd_print("calling d_instantiate");
+
 	d_instantiate(dentry, inode);
 out:
 	unlock_data(sbi);
+	dd_print("~ddfs_create %d", err);
 	return err;
 }
 
