@@ -19,6 +19,9 @@
 #define DDFS_PART_ATTRIBUTES 2
 #define DDFS_PART_SIZE 4
 #define DDFS_PART_FIRST_CLUSTER 8
+#define DDFS_PART_ALL                                                          \
+	(DDFS_PART_NAME | DDFS_PART_ATTRIBUTES | DDFS_PART_SIZE |              \
+	 DDFS_PART_FIRST_CLUSTER)
 
 #define DDFS_ROOT_INO 0
 
@@ -1243,7 +1246,7 @@ static int ddfs_find(struct inode *dir, const char *name,
 	     ++entry_index) {
 		int i;
 		const struct dir_entry_ptrs entry_ptrs =
-			access_dir_entries(dir, entry_index, DDFS_PART_NAME);
+			access_dir_entries(dir, entry_index, DDFS_PART_ALL);
 
 		dd_print("entry_index: %d", entry_index);
 		dump_dir_entry_ptrs(&entry_ptrs);
@@ -1261,8 +1264,7 @@ static int ddfs_find(struct inode *dir, const char *name,
 				dest_de->attributes =
 					*entry_ptrs.attributes.ptr;
 
-				release_dir_entries(&entry_ptrs,
-						    DDFS_PART_NAME);
+				release_dir_entries(&entry_ptrs, DDFS_PART_ALL);
 
 				dd_print("~ddfs_find 0");
 				return 0;
