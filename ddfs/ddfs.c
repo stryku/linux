@@ -1744,9 +1744,11 @@ static struct file_system_type ddfs_fs_type = {
 
 static int __init init_ddfs_fs(void)
 {
+	int err;
 	dd_print("init_ddfs_fs");
-	return register_filesystem(&ddfs_fs_type);
+	err = register_filesystem(&ddfs_fs_type);
 	dd_print("~init_ddfs_fs");
+	return err;
 }
 
 static void __exit exit_ddfs_fs(void)
