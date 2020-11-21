@@ -838,54 +838,6 @@ static long ddfs_add_dir_entry(struct inode *dir, const struct qstr *qname)
 	// Todo: handle no space on cluster
 
 	const unsigned new_entry_index = dd_idir->number_of_entries;
-	const unsigned new_entry_index_on_cluster =
-		new_entry_index % sbi->entries_per_cluster;
-	++dd_idir->number_of_entries;
-
-	// Write entry name.
-
-	// Name offset on cluster. In bytes.
-	const unsigned name_offset_on_cluster =
-		sbi->name_entries_offset +
-		new_entry_index_on_cluster *
-			sizeof(DDFS_DIR_ENTRY_FIRST_CLUSTER_TYPE);
-
-	// First cluster offset on cluster. In bytes.
-	const unsigned first_cluster_offset_on_cluster =
-		sbi->first_cluster_entries_offset +
-		new_entry_index_on_cluster *
-			sizeof(DDFS_DIR_ENTRY_FIRST_CLUSTER_TYPE);
-
-	// Logical cluster no on which the new entry lays
-	const unsigned new_entry_logic_cluster_no =
-		dd_idir->i_logstart +
-		(new_entry_index / sbi->entries_per_cluster);
-	// New entry name block on cluster
-	const unsigned new_entry_name_block_no_on_logic_cluster =
-		name_offset_on_cluster / sb->block_size;
-	// New entry first cluster block on cluster
-	const unsigned new_entry_first_cluster_block_no_on_logic_cluster =
-		first_cluster_offset_on_cluster / sb->block_size;
-	// New entry name block no on device.
-	const unsigned new_entry_name_block_no_on_device =
-		sbi->data_cluster_no * sb->sec_per_clus +
-		new_entry_logic_cluster_no * sb->sec_per_clus +
-		new_entry_name_block_no_on_logic_cluster;
-	// New entry first cluster block no on device.
-	const unsigned new_entry_first_cluster_block_no_on_device =
-		sbi->data_cluster_no * sb->sec_per_clus +
-		new_entry_logic_cluster_no * sb->sec_per_clus +
-		new_entry_first_cluster_block_no_on_logic_cluster;
-
-	// Name offset on block. In bytes.
-	const unsigned new_entry_offset_on_block =
-		name_offset_on_cluster % sb->block_size;
-
-	// First cluster offset on block. In bytes.
-	const unsigned first_cluster_entry_offset_on_block =
-		first_cluster_offset_on_cluster % sb->block_size;
-
-	//////////////////
 
 	const struct dir_entry_offsets offsets =
 		calc_dir_entry_offsets(dir, new_entry_index);
@@ -896,25 +848,10 @@ static long ddfs_add_dir_entry(struct inode *dir, const struct qstr *qname)
 		dir, new_entry_index, DDFS_PART_NAME | DDFS_PART_FIRST_CLUSTER);
 
 	if (!parts_ptrs.name.bh) {
-		unlock_data(sbi);
-		--dd_idir->number_of_entries;
-		dd_error("unable to read inode block for updating (i_pos %lld)",
+		dd_error("unable to read inode block for name (i_pos %lld)",
 			 i_pos);
-		return -EIO;
+		goto fail_io;
 	}
-
-	// bh = sb_bread(sb, offsets.name.block_on_device);
-	// if (!bh) {
-	// 	unlock_data(sbi);
-	// 	--dd_idir->number_of_entries;
-	// 	dd_error("unable to read inode block for updating (i_pos %lld)",
-	// 		 i_pos);
-	// 	return -EIO;
-	// }
-
-	// DDFS_DIR_ENTRY_FIRST_CLUSTER_TYPE *name_ptr =
-	// 	(DDFS_DIR_ENTRY_FIRST_CLUSTER_TYPE *)(bh->b_data +
-	// 					      new_entry_offset_on_block);
 
 	int i;
 	for (i = 0; i < DDFS_DIR_ENTRY_NAME_CHARS_IN_PLACE; ++i) {
@@ -926,27 +863,30 @@ static long ddfs_add_dir_entry(struct inode *dir, const struct qstr *qname)
 
 	mark_buffer_dirty_inode(parts_ptrs.name.bh, dir);
 
-	// bh = sb_bread(sb, new_entry_first_cluster_block_no_on_device);
-	// if (!bh) {
-	// 	unlock_data(sbi);
-	// 	--dd_idir->number_of_entries;
-	// 	dd_error(
-	// 		"unable to read inode block for updating (i_pos %lld)",
-	// 		i_pos);
-	// 	return -EIO;
-	// }
+	if (!parts_ptrs.first_cluster.bh) {
+		dd_error(
+			"unable to read inode block for first_cluster (i_pos %lld)",
+			i_pos);
+		goto fail_io;
+	}
 
 	*parts_ptrs.first_cluster.ptr = DDFS_CLUSTER_UNUSED;
 	mark_buffer_dirty_inode(parts_ptrs.first_cluster.bh, dir);
 
-	// brelse(bh);
-
-	release_dir_entries(*parts_ptrs,
+	release_dir_entries(&parts_ptrs,
 			    DDFS_PART_NAME | DDFS_PART_FIRST_CLUSTER);
 
 	unlock_data(sbi);
 
 	return 0;
+
+fail_io:
+	--dd_idir->number_of_entries;
+	release_dir_entries(&parts_ptrs,
+			    DDFS_PART_NAME | DDFS_PART_FIRST_CLUSTER);
+
+	unlock_data(sbi);
+	return -EIO;
 }
 
 static int ddfs_create(struct inode *dir, struct dentry *dentry, umode_t mode,
