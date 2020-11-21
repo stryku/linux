@@ -80,10 +80,10 @@ struct ddfs_sb_info {
 
 	unsigned int entries_per_cluster; // Dir entries per cluster
 
-	unsigned int name_entries_start;
-	unsigned int attributes_entries_start;
-	unsigned int size_entries_start;
-	unsigned int first_cluster_entries_start;
+	unsigned int name_entries_offset;
+	unsigned int attributes_entries_offset;
+	unsigned int size_entries_offset;
+	unsigned int first_cluster_entries_offset;
 };
 
 static inline struct ddfs_sb_info *DDFS_SB(struct super_block *sb)
@@ -203,20 +203,20 @@ retry:
 
 	// Write first_cluster
 	const unsigned first_cluster_offset =
-		sbi->first_cluster_entries_start +
+		sbi->first_cluster_entries_offset +
 		DDFS_I(inode)->entry_index *
 			sizeof(DDFS_DIR_ENTRY_FIRST_CLUSTER_TYPE);
 	*((__u32)(bh->b_data + size_offset)) = DDFS_I(inode)->i_logstart;
 
 	// Write size
 	const unsigned size_offset =
-		sbi->size_entries_start +
+		sbi->size_entries_offset +
 		DDFS_I(inode)->entry_index * sizeof(DDFS_DIR_ENTRY_SIZE_TYPE);
 	*((__u32)(bh->b_data + size_offset)) = inode->i_size;
 
 	// Write dummy attributes
 	const unsigned attributes_offset =
-		sbi->attributes_entries_start +
+		sbi->attributes_entries_offset +
 		DDFS_I(inode)->entry_index *
 			sizeof(DDFS_DIR_ENTRY_ATTRIBUTES_TYPE);
 	*((__u8)(bh->b_data + size_offset)) = DDFS_FILE_ATTR;
@@ -1079,15 +1079,15 @@ static int ddfs_fill_super(struct super_block *sb, void *data, int silent)
 	sbi->entries_per_cluster =
 		sbi->cluster_size / sizeof(DDFS_DIR_ENTRY_SIZE_TYPE);
 
-	sbi->name_entries_start = = 0;
-	sbi->attributes_entries_start = =
+	sbi->name_entries_offset = = 0;
+	sbi->attributes_entries_offset = =
 		sbi->entries_per_cluster * DDFS_DIR_ENTRY_NAME_CHARS_IN_PLACE;
-	sbi->size_entries_start =
-		sbi->attributes_entries_start +
+	sbi->size_entries_offset =
+		sbi->attributes_entries_offset +
 		sbi->entries_per_cluster *
 			sizeof(DDFS_DIR_ENTRY_ATTRIBUTES_TYPE);
-	sbi->first_cluster_entries_start =
-		sbi->size_entries_start +
+	sbi->first_cluster_entries_offset =
+		sbi->size_entries_offset +
 		sbi->entries_per_cluster * sizeof(DDFS_DIR_ENTRY_SIZE_TYPE);
 
 	return -EINVAL;
