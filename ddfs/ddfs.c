@@ -1,4 +1,5 @@
 #include <linux/buffer_head.h>
+#include <linux/exportfs.h>
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/ctype.h>
@@ -838,69 +839,89 @@ static const struct super_operations ddfs_sops = {
 // 	return 0;
 // }
 
-static struct dentry *ddfs_fh_to_dentry(struct super_block *sb, struct fid *fid,
-					int fh_len, int fh_type)
-{
-	return generic_fh_to_dentry(sb, fid, fh_len, fh_type,
-				    fat_nfs_get_inode);
-}
+// static struct dentry *ddfs_fh_to_dentry(struct super_block *sb, struct fid *fid,
+// 					int fh_len, int fh_type)
+// {
+// 	return generic_fh_to_dentry(sb, fid, fh_len, fh_type,
+// 				    fat_nfs_get_inode);
+// }
 
-static struct dentry *ddfs_fh_to_parent(struct super_block *sb, struct fid *fid,
-					int fh_len, int fh_type)
-{
-	return generic_fh_to_parent(sb, fid, fh_len, fh_type,
-				    fat_nfs_get_inode);
-}
+// static struct dentry *ddfs_fh_to_parent(struct super_block *sb, struct fid *fid,
+// 					int fh_len, int fh_type)
+// {
+// 	return generic_fh_to_parent(sb, fid, fh_len, fh_type,
+// 				    fat_nfs_get_inode);
+// }
 
-static struct dentry *ddfs_get_parent(struct dentry *child_dir)
-{
-	struct super_block *sb = child_dir->d_sb;
-	struct buffer_head *bh = NULL;
-	struct msdos_dir_entry *de;
-	struct inode *parent_inode = NULL;
-	struct msdos_sb_info *sbi = MSDOS_SB(sb);
+// static inline int fat_get_dotdot_entry(struct inode *dir,
+// 				       struct ddfs_dir_entry **de)
+// {
+// 	*de = NULL;
+// 	return ddfs_find(dir, "..", *de);
+// }
 
-	if (!fat_get_dotdot_entry(d_inode(child_dir), &bh, &de)) {
-		int parent_logstart = fat_get_start(sbi, de);
-		parent_inode = fat_dget(sb, parent_logstart);
-		if (!parent_inode && sbi->options.nfs == FAT_NFS_NOSTALE_RO)
-			parent_inode = fat_rebuild_parent(sb, parent_logstart);
-	}
-	brelse(bh);
+// static struct dentry *ddfs_get_parent(struct dentry *child_dir)
+// {
+// 	struct super_block *sb = child_dir->d_sb;
+// 	struct ddfs_dir_entry *de;
+// 	struct inode *parent_inode = NULL;
+// 	struct ddfs_sb_info *sbi = DDFS_SB(sb);
 
-	return d_obtain_alias(parent_inode);
-}
+// 	if (!fat_get_dotdot_entry(d_inode(child_dir), &bh, &de)) {
+// 		int parent_logstart = fat_get_start(sbi, de);
+// 		parent_inode = fat_dget(sb, parent_logstart);
+// 		if (!parent_inode && sbi->options.nfs == FAT_NFS_NOSTALE_RO) {
+// 			parent_inode = fat_rebuild_parent(sb, parent_logstart);
+// 		}
+// 	}
 
-const struct export_operations fat_export_ops = {
-	.fh_to_dentry = ddfs_fh_to_dentry,
-	.fh_to_parent = ddfs_fh_to_parent,
-	.get_parent = ddfs_get_parent,
+// 	return d_obtain_alias(parent_inode);
+// }
+
+const struct export_operations ddfs_export_ops = {
+	// .fh_to_dentry = ddfs_fh_to_dentry,
+	// .fh_to_parent = ddfs_fh_to_parent,
+	// .get_parent = ddfs_get_parent,
 };
 
-static long ddfs_add_dir_entry(struct inode *dir, const struct qstr *qname)
+static struct ddfs_dir_entry
+ddfs_make_dir_entry(const struct dir_entry_ptrs *parts_ptrs)
 {
-	struct super_block *sb = dir->i_sb;
-	struct ddfs_sb_info *sbi = DDFS_SB(sb);
+	struct ddfs_dir_entry result;
+	if (parts_ptrs->name.bh) {
+		memcpy(result.name, parts_ptrs->name.ptr, 4);
+	}
+	if (parts_ptrs->size.bh) {
+		result.size = *parts_ptrs->size.ptr;
+	}
+	if (parts_ptrs->attributes.bh) {
+		result.attributes = *parts_ptrs->attributes.ptr;
+	}
+	if (parts_ptrs->first_cluster.bh) {
+		result.first_cluster = *parts_ptrs->first_cluster.ptr;
+	}
+
+	return result;
+}
+
+static long ddfs_add_dir_entry(struct inode *dir, const struct qstr *qname,
+			       struct ddfs_dir_entry *de)
+{
 	struct ddfs_inode_info *dd_idir = DDFS_I(dir);
-	struct buffer_head *bh;
 	// Todo: handle no space on cluster
 
 	const unsigned new_entry_index = dd_idir->number_of_entries;
 
-	const struct dir_entry_offsets offsets =
-		calc_dir_entry_offsets(dir, new_entry_index);
-
 	const struct dir_entry_ptrs parts_ptrs = access_dir_entries(
 		dir, new_entry_index, DDFS_PART_NAME | DDFS_PART_FIRST_CLUSTER);
+	int i;
 
 	// Set name
 	if (!parts_ptrs.name.bh) {
-		dd_error("unable to read inode block for name (i_pos %lld)",
-			 i_pos);
+		dd_error("unable to read inode block for name");
 		goto fail_io;
 	}
 
-	int i;
 	for (i = 0; i < DDFS_DIR_ENTRY_NAME_CHARS_IN_PLACE; ++i) {
 		parts_ptrs.name.ptr[i] = qname->name[i];
 		if (!qname->name[i]) {
@@ -912,14 +933,14 @@ static long ddfs_add_dir_entry(struct inode *dir, const struct qstr *qname)
 
 	// Set first cluster
 	if (!parts_ptrs.first_cluster.bh) {
-		dd_error(
-			"unable to read inode block for first_cluster (i_pos %lld)",
-			i_pos);
+		dd_error("unable to read inode block for first_cluster");
 		goto fail_io;
 	}
 
 	*parts_ptrs.first_cluster.ptr = DDFS_CLUSTER_UNUSED;
 	mark_buffer_dirty_inode(parts_ptrs.first_cluster.bh, dir);
+
+	*de = ddfs_make_dir_entry(&parts_ptrs);
 
 	release_dir_entries(&parts_ptrs,
 			    DDFS_PART_NAME | DDFS_PART_FIRST_CLUSTER);
@@ -934,16 +955,50 @@ fail_io:
 	return -EIO;
 }
 
+const struct inode_operations ddfs_file_inode_operations = {
+	// Todo: fill
+	// .setattr = fat_setattr,
+	// .getattr = fat_getattr,
+	// .update_time = fat_update_time,
+};
+
+const struct file_operations ddfs_file_operations = {
+	// Todo: fill
+	// 	.llseek = generic_file_llseek,
+	// 	.read_iter = generic_file_read_iter,
+	// 	.write_iter = generic_file_write_iter,
+	// 	.mmap = generic_file_mmap,
+	// 	.release = fat_file_release,
+	// 	.unlocked_ioctl = fat_generic_ioctl,
+	// #ifdef CONFIG_COMPAT
+	// 	.compat_ioctl = fat_generic_compat_ioctl,
+	// #endif
+	// 	.fsync = fat_file_fsync,
+	// 	.splice_read = generic_file_splice_read,
+	// 	.splice_write = iter_file_splice_write,
+	// 	.fallocate = fat_fallocate,
+};
+
+static const struct address_space_operations ddfs_aops = {
+	// Todo: fill
+	// .readpage = fat_readpage,
+	// .readpages = fat_readpages,
+	// .writepage = fat_writepage,
+	// .writepages = fat_writepages,
+	// .write_begin = fat_write_begin,
+	// .write_end = fat_write_end,
+	// .direct_IO = fat_direct_IO,
+	// .bmap = _fat_bmap
+};
+
 /* doesn't deal with root inode */
 int ddfs_fill_inode(struct inode *inode, struct ddfs_dir_entry *de)
 {
-	struct msdos_sb_info *sbi = MSDOS_SB(inode->i_sb);
 	struct ddfs_inode_info *dd_inode = DDFS_I(inode);
-	int error;
 
 	dd_inode->i_pos = 0;
-	inode->i_uid = sbi->options.fs_uid;
-	inode->i_gid = sbi->options.fs_gid;
+	// inode->i_uid = sbi->options.fs_uid;
+	// inode->i_gid = sbi->options.fs_gid;
 	inode_inc_iversion(inode);
 	inode->i_generation = get_seconds();
 
@@ -969,7 +1024,7 @@ struct inode *ddfs_build_inode(struct super_block *sb,
 	struct inode *inode;
 	int err;
 
-	lock_inode_build(MSDOS_SB(sb));
+	lock_inode_build(DDFS_SB(sb));
 
 	inode = new_inode(sb);
 	if (!inode) {
@@ -988,7 +1043,7 @@ struct inode *ddfs_build_inode(struct super_block *sb,
 	// insert_inode_hash(inode);
 
 out:
-	unlock_inode_build(MSDOS_SB(sb));
+	unlock_inode_build(DDFS_SB(sb));
 	return inode;
 }
 
@@ -998,22 +1053,20 @@ static int ddfs_create(struct inode *dir, struct dentry *dentry, umode_t mode,
 	struct super_block *sb = dir->i_sb;
 	struct ddfs_sb_info *sbi = DDFS_SB(sb);
 	struct inode *inode;
-	struct fat_slot_info slot_info;
-	struct timespec64 ts;
 	int err;
+	struct ddfs_dir_entry de;
 
 	lock_data(sbi);
 
 	// ts = current_time(dir);
 	// err = vfat_add_entry(dir, &dentry->d_name, 0, 0, &ts, &slot_info);
-	err = ddfs_add_dir_entry(dir, &dentry->d_name);
+	err = ddfs_add_dir_entry(dir, &dentry->d_name, &de);
 	if (err) {
 		goto out;
 	}
 	inode_inc_iversion(dir);
 
-	inode = fat_build_inode(sb, sinfo.de, sinfo.i_pos);
-	brelse(sinfo.bh);
+	inode = ddfs_build_inode(sb, &de);
 	if (IS_ERR(inode)) {
 		err = PTR_ERR(inode);
 		goto out;
@@ -1028,14 +1081,14 @@ out:
 	return err;
 }
 
-static int ddfs_find(struct inode *dir, const struct qstr *qname,
+static int ddfs_find(struct inode *dir, const char *name,
 		     struct ddfs_dir_entry *dest_de)
 {
 	struct ddfs_inode_info *dd_dir = DDFS_I(dir);
-	const unsigned int len = vfat_striptail_len(qname);
-	if (len == 0 || len > 4) {
-		return -ENOENT;
-	}
+	// const unsigned int len = vfat_striptail_len(qname);
+	// if (len == 0 || len > 4) {
+	// 	return -ENOENT;
+	// }
 
 	int entry_index;
 	for (entry_index = 0; entry_index < dd_dir->number_of_entries;
@@ -1045,7 +1098,7 @@ static int ddfs_find(struct inode *dir, const struct qstr *qname,
 
 		int i;
 		for (i = 0; i < 4; ++i) {
-			if (entry_ptrs.name.ptr[i] == qname->name[i] &&
+			if (entry_ptrs.name.ptr[i] == name[i] &&
 			    !entry_ptrs.name.ptr[i]) {
 				memcpy(dest_de->name, entry_ptrs.name.ptr, i);
 				dest_de->entry_index = entry_index;
@@ -1060,7 +1113,7 @@ static int ddfs_find(struct inode *dir, const struct qstr *qname,
 				return 0;
 			}
 
-			if (!entry_ptrs.name.ptr[i] || !qname->name[i]) {
+			if (!entry_ptrs.name.ptr[i] || !name[i]) {
 				break;
 			}
 		}
@@ -1083,7 +1136,7 @@ static struct dentry *ddfs_lookup(struct inode *dir, struct dentry *dentry,
 
 	lock_data(sbi);
 
-	err = ddfs_find(dir, &dentry->d_name, &de);
+	err = ddfs_find(dir, (const char *)(&dentry->d_name.name), &de);
 	if (err) {
 		if (err == -ENOENT) {
 			inode = NULL;
@@ -1092,7 +1145,7 @@ static struct dentry *ddfs_lookup(struct inode *dir, struct dentry *dentry,
 		goto error;
 	}
 
-	inode = ddfs_build_inode(sb, de);
+	inode = ddfs_build_inode(sb, &de);
 	if (IS_ERR(inode)) {
 		err = PTR_ERR(inode);
 		goto error;
@@ -1517,35 +1570,31 @@ static const struct inode_operations ddfs_dir_inode_operations = {
 
 static int ddfs_revalidate(struct dentry *dentry, unsigned int flags)
 {
-	if (flags & LOOKUP_RCU)
-		return -ECHILD;
+	// if (flags & LOOKUP_RCU)
+	// 	return -ECHILD;
 
-	/* This is not negative dentry. Always valid. */
-	if (d_really_is_positive(dentry))
-		return 1;
-	return vfat_revalidate_shortname(dentry);
+	// /* This is not negative dentry. Always valid. */
+	// if (d_really_is_positive(dentry))
+	// 	return 1;
+	// return vfat_revalidate_shortname(dentry);
+
+	// Todo: probably should be handled
+	return 0;
 }
 
 static int ddfs_hash(const struct dentry *dentry, struct qstr *qstr)
 {
-	qstr->hash =
-		full_name_hash(dentry, qstr->name, vfat_striptail_len(qstr));
+	// qstr->hash = full_name_hash(dentry, qstr->name, vfat_striptail_len(qstr));
+	qstr->hash = full_name_hash(dentry, qstr->name,
+				    DDFS_DIR_ENTRY_NAME_CHARS_IN_PLACE);
 	return 0;
 }
 
 static int ddfs_cmp(const struct dentry *dentry, unsigned int len,
 		    const char *str, const struct qstr *name)
 {
-	unsigned int alen, blen;
-
-	/* A filename cannot end in '.' or we treat it like it has none */
-	alen = vfat_striptail_len(name);
-	blen = __vfat_striptail_len(len, str);
-	if (alen == blen) {
-		if (strncmp(name->name, str, alen) == 0)
-			return 0;
-	}
-	return 1;
+	return !(strncmp(name->name, str, DDFS_DIR_ENTRY_NAME_CHARS_IN_PLACE) ==
+		 0);
 }
 
 static const struct dentry_operations ddfs_dentry_ops = {
@@ -1574,7 +1623,7 @@ void log_boot_sector(struct ddfs_boot_sector *boot_sector)
 		 boot_sector->number_of_clusters);
 }
 
-unsigned int calculate_data_offset(struct msdos_sb_info *sbi)
+unsigned int calculate_data_offset(struct ddfs_sb_info *sbi)
 {
 	unsigned int first_data_cluster = 1; // 1 for boot sector
 	unsigned int table_end = sbi->table_offset + sbi->table_size;
@@ -1590,7 +1639,7 @@ unsigned int calculate_data_offset(struct msdos_sb_info *sbi)
 
 static int ddfs_fill_super(struct super_block *sb, void *data, int silent)
 {
-	struct msdos_sb_info *sbi;
+	struct ddfs_sb_info *sbi;
 	long error;
 	struct buffer_head *bh;
 	struct ddfs_boot_sector boot_sector;
@@ -1602,19 +1651,19 @@ static int ddfs_fill_super(struct super_block *sb, void *data, int silent)
 
 	sb->s_flags |= SB_NODIRATIME;
 	sb->s_magic = DDFS_SUPER_MAGIC;
-	sb->s_op = &fat_sops;
+	sb->s_op = &ddfs_sops;
 	sb->s_export_op = &ddfs_export_ops;
 	sb->s_time_gran = 1;
-	mutex_init(&sbi->nfs_build_inode_lock);
-	ratelimit_state_init(&sbi->ratelimit, DEFAULT_RATELIMIT_INTERVAL,
-			     DEFAULT_RATELIMIT_BURST);
+	// mutex_init(&sbi->nfs_build_inode_lock);
+	// ratelimit_state_init(&sbi->ratelimit, DEFAULT_RATELIMIT_INTERVAL,
+	// 		     DEFAULT_RATELIMIT_BURST);
 
-	error = parse_options(sb, data, isvfat, silent, &debug, &sbi->options);
-	if (error) {
-		goto out_fail;
-	}
+	// error = parse_options(sb, data, isvfat, silent, &debug, &sbi->options);
+	// if (error) {
+	// goto out_fail;
+	// }
 
-	sb->s_fs_info->dir_ops = &ddfs_dir_inode_operations;
+	// sb->s_fs_info->dir_ops = &ddfs_dir_inode_operations;
 	sb->s_d_op = &ddfs_dentry_ops;
 
 	error = -EIO;
@@ -1638,18 +1687,18 @@ static int ddfs_fill_super(struct super_block *sb, void *data, int silent)
 	mutex_init(&sbi->s_lock);
 	sbi->cluster_size = sb->s_blocksize * sbi->blocks_per_cluster;
 	sbi->number_of_table_entries = boot_sector.number_of_clusters;
-	sbi->table_start = sbi->cluster_size;
+	sbi->table_offset = sbi->cluster_size;
 	sbi->table_size =
 		boot_sector.number_of_clusters * sizeof(struct ddfs_dir_entry);
 	sbi->data_offset = calculate_data_offset(sbi);
 	sbi->data_cluster_no = sbi->data_offset / sbi->cluster_size;
-	sbi->blocksize = sb->s_blocksize;
+	sbi->block_size = sb->s_blocksize;
 
 	sbi->entries_per_cluster =
 		sbi->cluster_size / sizeof(DDFS_DIR_ENTRY_SIZE_TYPE);
 
-	sbi->name_entries_offset = = 0;
-	sbi->attributes_entries_offset = =
+	sbi->name_entries_offset = 0;
+	sbi->attributes_entries_offset =
 		sbi->entries_per_cluster * DDFS_DIR_ENTRY_NAME_CHARS_IN_PLACE;
 	sbi->size_entries_offset =
 		sbi->attributes_entries_offset +
@@ -1671,8 +1720,8 @@ static struct dentry *ddfs_mount(struct file_system_type *fs_type, int flags,
 				 const char *dev_name, void *data)
 {
 	dd_print("init_ddfs_fs\n");
-	// return mount_bdev(fs_type, flags, dev_name, data, ddfs_fill_super);
-	return ERR_PTR(-EINVAL);
+	return mount_bdev(fs_type, flags, dev_name, data, ddfs_fill_super);
+	// return ERR_PTR(-EINVAL);
 }
 
 static struct file_system_type ddfs_fs_type = {
