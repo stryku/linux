@@ -1746,12 +1746,14 @@ static int __init init_ddfs_fs(void)
 {
 	dd_print("init_ddfs_fs");
 	return register_filesystem(&ddfs_fs_type);
+	dd_print("~init_ddfs_fs");
 }
 
 static void __exit exit_ddfs_fs(void)
 {
 	dd_print("exit_ddfs_fs");
 	unregister_filesystem(&ddfs_fs_type);
+	dd_print("~exit_ddfs_fs");
 }
 
 MODULE_ALIAS_FS("ddfs");
