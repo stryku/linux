@@ -1712,6 +1712,8 @@ static int ddfs_read_root(struct inode *inode)
 	// inode->i_mtime.tv_nsec = inode->i_atime.tv_nsec =inode->i_ctime.tv_nsec = 0;
 	// set_nlink(inode, fat_subdirs(inode) + 2);
 
+	dd_print("~ddfs_read_root 0");
+
 	return 0;
 }
 
@@ -1812,6 +1814,7 @@ static int ddfs_fill_super(struct super_block *sb, void *data, int silent)
 		dd_print("ddfs_read_root failed with: %ld", error);
 		goto out_fail;
 	}
+	dd_print("ddfs_read_root succeed");
 
 	sb->s_root = d_make_root(root_inode);
 	if (!sb->s_root) {
