@@ -1723,7 +1723,7 @@ static int ddfs_fill_super(struct super_block *sb, void *data, int silent)
 out_fail:
 	sb->s_fs_info = NULL;
 	kfree(sbi);
-	dd_print("~ddfs_fill_super %d", error);
+	dd_print("~ddfs_fill_super %ld", error);
 	return error;
 }
 
