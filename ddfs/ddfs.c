@@ -21,6 +21,34 @@
 
 MODULE_LICENSE("Dual BSD/GPL");
 
+/*
+ * DDFS inode data in memory
+ */
+struct ddfs_inode_info {
+	spinlock_t cache_lru_lock;
+	struct list_head cache_lru;
+	int nr_caches;
+	/* for avoiding the race between fat_free() and fat_get_cluster() */
+	unsigned int cache_valid_id;
+
+	/* NOTE: mmu_private is 64bits, so must hold ->i_mutex to access */
+	loff_t mmu_private; /* physically allocated size */
+
+	int i_start; /* first cluster or 0 */
+	int i_logstart; /* logical first cluster */
+	int i_attrs; /* unused attribute bits */
+	loff_t i_pos; /* on-disk position of directory entry or 0 */
+	struct hlist_node i_fat_hash; /* hash by i_location */
+	struct hlist_node i_dir_hash; /* hash by i_logstart */
+	struct rw_semaphore truncate_lock; /* protect bmap against truncate */
+	struct inode ddfs_inode;
+};
+
+static inline struct ddfs_inode_info *DDFS_I(struct inode *inode)
+{
+	return container_of(inode, struct ddfs_inode_info, ddfs_inode);
+}
+
 struct ddfs_sb_info {
 	unsigned int table_offset; // From begin of partition
 	unsigned int table_size; // In bytes
@@ -29,7 +57,14 @@ struct ddfs_sb_info {
 	unsigned int cluster_size; // In bytes
 
 	unsigned int data_offset; // From begin of partition
+
+	unsigned long block_size; // Size of block (sector) in bytes
 };
+
+static inline struct ddfs_sb_info *DDFS_SB(struct super_block *sb)
+{
+	return sb->s_fs_info;
+}
 
 static struct kmem_cache *ddfs_inode_cachep;
 
@@ -41,7 +76,7 @@ static struct inode *ddfs_alloc_inode(struct super_block *sb)
 		return NULL;
 
 	init_rwsem(&ei->truncate_lock);
-	return &ei->vfs_inode;
+	return &ei->ddfs_inode;
 }
 
 static void ddfs_free_inode(struct inode *inode)
@@ -49,56 +84,105 @@ static void ddfs_free_inode(struct inode *inode)
 	kmem_cache_free(ddfs_inode_cachep, MSDOS_I(inode));
 }
 
+static inline loff_t ddfs_i_pos_read(struct msdos_sb_info *sbi,
+				     struct inode *inode)
+{
+	loff_t i_pos;
+#if BITS_PER_LONG == 32
+	spin_lock(&sbi->inode_hash_lock);
+#endif
+	i_pos = DDFS_I(inode)->i_pos;
+#if BITS_PER_LONG == 32
+	spin_unlock(&sbi->inode_hash_lock);
+#endif
+	return i_pos;
+}
+
+/* Convert linear UNIX date to a FAT time/date pair. */
+void fat_time_unix2fat(struct ddfs_sb_info *sbi, struct timespec64 *ts,
+		       __le16 *time, __le16 *date, u8 *time_cs)
+{
+	struct tm tm;
+	time64_to_tm(ts->tv_sec, -fat_tz_offset(sbi), &tm);
+
+	/*  FAT can only support year between 1980 to 2107 */
+	if (tm.tm_year < 1980 - 1900) {
+		*time = 0;
+		*date = cpu_to_le16((0 << 9) | (1 << 5) | 1);
+		if (time_cs)
+			*time_cs = 0;
+		return;
+	}
+	if (tm.tm_year > 2107 - 1900) {
+		*time = cpu_to_le16((23 << 11) | (59 << 5) | 29);
+		*date = cpu_to_le16((127 << 9) | (12 << 5) | 31);
+		if (time_cs)
+			*time_cs = 199;
+		return;
+	}
+
+	/* from 1900 -> from 1980 */
+	tm.tm_year -= 80;
+	/* 0~11 -> 1~12 */
+	tm.tm_mon++;
+	/* 0~59 -> 0~29(2sec counts) */
+	tm.tm_sec >>= 1;
+
+	*time = cpu_to_le16(tm.tm_hour << 11 | tm.tm_min << 5 | tm.tm_sec);
+	*date = cpu_to_le16(tm.tm_year << 9 | tm.tm_mon << 5 | tm.tm_mday);
+	if (time_cs)
+		*time_cs = (ts->tv_sec & 1) * 100 + ts->tv_nsec / 10000000;
+}
+
+static inline void ddfs_get_blknr_offset(struct ddfs_sb_info *sbi, loff_t i_pos,
+					 sector_t *blknr, int *offset)
+{
+	*blknr = i_pos / sbi->block_size;
+	*offset = i_pos % sbi->block_size;
+}
+
 static int __ddfs_write_inode(struct inode *inode, int wait)
 {
 	struct super_block *sb = inode->i_sb;
-	struct msdos_sb_info *sbi = MSDOS_SB(sb);
+	struct ddfs_sb_info *sbi = DDFS_SB(sb);
 	struct buffer_head *bh;
-	struct msdos_dir_entry *raw_entry;
+	struct ddfs_dir_entry *raw_entry;
 	loff_t i_pos;
 	sector_t blocknr;
 	int err, offset;
 
-	if (inode->i_ino == MSDOS_ROOT_INO)
-		return 0;
-
 retry:
-	i_pos = fat_i_pos_read(sbi, inode);
-	if (!i_pos)
+	i_pos = ddfs_i_pos_read(sbi, inode);
+	if (!i_pos) {
 		return 0;
+	}
 
-	fat_get_blknr_offset(sbi, i_pos, &blocknr, &offset);
+	ddfs_get_blknr_offset(sbi, i_pos, &blocknr, &offset);
 	bh = sb_bread(sb, blocknr);
 	if (!bh) {
-		fat_msg(sb, KERN_ERR,
-			"unable to read inode block "
-			"for updating (i_pos %lld)",
-			i_pos);
-		return -EIO;
+		dd_error("unable to read inode block for updating (i_pos %lld)",
+			 i_pos) return -EIO;
 	}
+
 	spin_lock(&sbi->inode_hash_lock);
-	if (i_pos != MSDOS_I(inode)->i_pos) {
+	if (i_pos != DDFS_I(inode)->i_pos) {
 		spin_unlock(&sbi->inode_hash_lock);
 		brelse(bh);
 		goto retry;
 	}
 
-	raw_entry = &((struct msdos_dir_entry *)(bh->b_data))[offset];
-	if (S_ISDIR(inode->i_mode))
+	raw_entry = &((struct ddfs_dir_entry *)(bh->b_data))[offset];
+	if (S_ISDIR(inode->i_mode)) {
 		raw_entry->size = 0;
-	else
+	} else {
 		raw_entry->size = cpu_to_le32(inode->i_size);
-	raw_entry->attr = fat_make_attrs(inode);
-	fat_set_start(raw_entry, MSDOS_I(inode)->i_logstart);
-	fat_time_unix2fat(sbi, &inode->i_mtime, &raw_entry->time,
-			  &raw_entry->date, NULL);
-	if (sbi->options.isvfat) {
-		__le16 atime;
-		fat_time_unix2fat(sbi, &inode->i_ctime, &raw_entry->ctime,
-				  &raw_entry->cdate, &raw_entry->ctime_cs);
-		fat_time_unix2fat(sbi, &inode->i_atime, &atime,
-				  &raw_entry->adate, NULL);
 	}
+
+	raw_entry->attr = ddfs_make_attrs(inode);
+	ddfs_set_start(raw_entry, DDFS_I(inode)->i_logstart);
+	ddfs_time_unix2fat(sbi, &inode->i_mtime, &raw_entry->time,
+			   &raw_entry->date, NULL);
+
 	spin_unlock(&sbi->inode_hash_lock);
 	mark_buffer_dirty(bh);
 	err = 0;
@@ -111,6 +195,24 @@ retry:
 static int ddfs_write_inode(struct inode *inode, struct writeback_control *wbc)
 {
 	return __ddfs_write_inode(inode, wbc->sync_mode == WB_SYNC_ALL);
+}
+
+void ddfs_truncate_blocks(struct inode *inode, loff_t offset)
+{
+	struct ddfs_sb_info *sbi = DDFS_SB(inode->i_sb);
+	int nr_clusters;
+
+	/*
+	 * This protects against truncating a file bigger than it was then
+	 * trying to write into the hole.
+	 */
+	if (MSDOS_I(inode)->mmu_private > offset)
+		MSDOS_I(inode)->mmu_private = offset;
+
+	nr_clusters = (offset + (sbi->cluster_size - 1)) / sbi->cluster_size;
+
+	fat_free(inode, nr_clusters);
+	fat_flush_inodes(inode->i_sb, inode, NULL);
 }
 
 static void ddfs_evict_inode(struct inode *inode)
@@ -921,6 +1023,7 @@ static int ddfs_fill_super(struct super_block *sb, void *data, int silent)
 	sbi->table_size =
 		boot_sector.number_of_clusters * sizeof(struct ddfs_dir_entry);
 	sbi->data_offset = calculate_data_offset(sbi);
+	sbi->blocksize = sb->s_blocksize;
 
 	return -EINVAL;
 
