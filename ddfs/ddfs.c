@@ -436,7 +436,7 @@ static int ddfs_remount(struct super_block *sb, int *flags, char *data)
 	return 0;
 }
 
-static int ddfs_show_options(struct seq_file *m, struct dentry *root);
+// static int ddfs_show_options(struct seq_file *m, struct dentry *root);
 static const struct super_operations ddfs_sops = {
 	.alloc_inode = ddfs_alloc_inode,
 	.free_inode = ddfs_free_inode,
@@ -446,100 +446,101 @@ static const struct super_operations ddfs_sops = {
 	// .statfs = ddfs_statfs,
 	.remount_fs = ddfs_remount,
 
-	.show_options = ddfs_show_options,
+	// .show_options = ddfs_show_options,
 };
 
-static int ddfs_show_options(struct seq_file *m, struct dentry *root)
-{
-	struct msdos_sb_info *sbi = MSDOS_SB(root->d_sb);
-	struct fat_mount_options *opts = &sbi->options;
-	int isvfat = opts->isvfat;
+// Todo: implement?
+// static int ddfs_show_options(struct seq_file *m, struct dentry *root)
+// {
+// 	struct msdos_sb_info *sbi = MSDOS_SB(root->d_sb);
+// 	struct fat_mount_options *opts = &sbi->options;
+// 	int isvfat = opts->isvfat;
 
-	if (!uid_eq(opts->fs_uid, GLOBAL_ROOT_UID))
-		seq_printf(m, ",uid=%u",
-			   from_kuid_munged(&init_user_ns, opts->fs_uid));
-	if (!gid_eq(opts->fs_gid, GLOBAL_ROOT_GID))
-		seq_printf(m, ",gid=%u",
-			   from_kgid_munged(&init_user_ns, opts->fs_gid));
-	seq_printf(m, ",fmask=%04o", opts->fs_fmask);
-	seq_printf(m, ",dmask=%04o", opts->fs_dmask);
-	if (opts->allow_utime)
-		seq_printf(m, ",allow_utime=%04o", opts->allow_utime);
-	if (sbi->nls_disk)
-		/* strip "cp" prefix from displayed option */
-		seq_printf(m, ",codepage=%s", &sbi->nls_disk->charset[2]);
-	if (isvfat) {
-		if (sbi->nls_io)
-			seq_printf(m, ",iocharset=%s", sbi->nls_io->charset);
+// 	if (!uid_eq(opts->fs_uid, GLOBAL_ROOT_UID))
+// 		seq_printf(m, ",uid=%u",
+// 			   from_kuid_munged(&init_user_ns, opts->fs_uid));
+// 	if (!gid_eq(opts->fs_gid, GLOBAL_ROOT_GID))
+// 		seq_printf(m, ",gid=%u",
+// 			   from_kgid_munged(&init_user_ns, opts->fs_gid));
+// 	seq_printf(m, ",fmask=%04o", opts->fs_fmask);
+// 	seq_printf(m, ",dmask=%04o", opts->fs_dmask);
+// 	if (opts->allow_utime)
+// 		seq_printf(m, ",allow_utime=%04o", opts->allow_utime);
+// 	if (sbi->nls_disk)
+// 		/* strip "cp" prefix from displayed option */
+// 		seq_printf(m, ",codepage=%s", &sbi->nls_disk->charset[2]);
+// 	if (isvfat) {
+// 		if (sbi->nls_io)
+// 			seq_printf(m, ",iocharset=%s", sbi->nls_io->charset);
 
-		switch (opts->shortname) {
-		case VFAT_SFN_DISPLAY_WIN95 | VFAT_SFN_CREATE_WIN95:
-			seq_puts(m, ",shortname=win95");
-			break;
-		case VFAT_SFN_DISPLAY_WINNT | VFAT_SFN_CREATE_WINNT:
-			seq_puts(m, ",shortname=winnt");
-			break;
-		case VFAT_SFN_DISPLAY_WINNT | VFAT_SFN_CREATE_WIN95:
-			seq_puts(m, ",shortname=mixed");
-			break;
-		case VFAT_SFN_DISPLAY_LOWER | VFAT_SFN_CREATE_WIN95:
-			seq_puts(m, ",shortname=lower");
-			break;
-		default:
-			seq_puts(m, ",shortname=unknown");
-			break;
-		}
-	}
-	if (opts->name_check != 'n')
-		seq_printf(m, ",check=%c", opts->name_check);
-	if (opts->usefree)
-		seq_puts(m, ",usefree");
-	if (opts->quiet)
-		seq_puts(m, ",quiet");
-	if (opts->showexec)
-		seq_puts(m, ",showexec");
-	if (opts->sys_immutable)
-		seq_puts(m, ",sys_immutable");
-	if (!isvfat) {
-		if (opts->dotsOK)
-			seq_puts(m, ",dotsOK=yes");
-		if (opts->nocase)
-			seq_puts(m, ",nocase");
-	} else {
-		if (opts->utf8)
-			seq_puts(m, ",utf8");
-		if (opts->unicode_xlate)
-			seq_puts(m, ",uni_xlate");
-		if (!opts->numtail)
-			seq_puts(m, ",nonumtail");
-		if (opts->rodir)
-			seq_puts(m, ",rodir");
-	}
-	if (opts->flush)
-		seq_puts(m, ",flush");
-	if (opts->tz_set) {
-		if (opts->time_offset)
-			seq_printf(m, ",time_offset=%d", opts->time_offset);
-		else
-			seq_puts(m, ",tz=UTC");
-	}
-	if (opts->errors == FAT_ERRORS_CONT)
-		seq_puts(m, ",errors=continue");
-	else if (opts->errors == FAT_ERRORS_PANIC)
-		seq_puts(m, ",errors=panic");
-	else
-		seq_puts(m, ",errors=remount-ro");
-	if (opts->nfs == FAT_NFS_NOSTALE_RO)
-		seq_puts(m, ",nfs=nostale_ro");
-	else if (opts->nfs)
-		seq_puts(m, ",nfs=stale_rw");
-	if (opts->discard)
-		seq_puts(m, ",discard");
-	if (opts->dos1xfloppy)
-		seq_puts(m, ",dos1xfloppy");
+// 		switch (opts->shortname) {
+// 		case VFAT_SFN_DISPLAY_WIN95 | VFAT_SFN_CREATE_WIN95:
+// 			seq_puts(m, ",shortname=win95");
+// 			break;
+// 		case VFAT_SFN_DISPLAY_WINNT | VFAT_SFN_CREATE_WINNT:
+// 			seq_puts(m, ",shortname=winnt");
+// 			break;
+// 		case VFAT_SFN_DISPLAY_WINNT | VFAT_SFN_CREATE_WIN95:
+// 			seq_puts(m, ",shortname=mixed");
+// 			break;
+// 		case VFAT_SFN_DISPLAY_LOWER | VFAT_SFN_CREATE_WIN95:
+// 			seq_puts(m, ",shortname=lower");
+// 			break;
+// 		default:
+// 			seq_puts(m, ",shortname=unknown");
+// 			break;
+// 		}
+// 	}
+// 	if (opts->name_check != 'n')
+// 		seq_printf(m, ",check=%c", opts->name_check);
+// 	if (opts->usefree)
+// 		seq_puts(m, ",usefree");
+// 	if (opts->quiet)
+// 		seq_puts(m, ",quiet");
+// 	if (opts->showexec)
+// 		seq_puts(m, ",showexec");
+// 	if (opts->sys_immutable)
+// 		seq_puts(m, ",sys_immutable");
+// 	if (!isvfat) {
+// 		if (opts->dotsOK)
+// 			seq_puts(m, ",dotsOK=yes");
+// 		if (opts->nocase)
+// 			seq_puts(m, ",nocase");
+// 	} else {
+// 		if (opts->utf8)
+// 			seq_puts(m, ",utf8");
+// 		if (opts->unicode_xlate)
+// 			seq_puts(m, ",uni_xlate");
+// 		if (!opts->numtail)
+// 			seq_puts(m, ",nonumtail");
+// 		if (opts->rodir)
+// 			seq_puts(m, ",rodir");
+// 	}
+// 	if (opts->flush)
+// 		seq_puts(m, ",flush");
+// 	if (opts->tz_set) {
+// 		if (opts->time_offset)
+// 			seq_printf(m, ",time_offset=%d", opts->time_offset);
+// 		else
+// 			seq_puts(m, ",tz=UTC");
+// 	}
+// 	if (opts->errors == FAT_ERRORS_CONT)
+// 		seq_puts(m, ",errors=continue");
+// 	else if (opts->errors == FAT_ERRORS_PANIC)
+// 		seq_puts(m, ",errors=panic");
+// 	else
+// 		seq_puts(m, ",errors=remount-ro");
+// 	if (opts->nfs == FAT_NFS_NOSTALE_RO)
+// 		seq_puts(m, ",nfs=nostale_ro");
+// 	else if (opts->nfs)
+// 		seq_puts(m, ",nfs=stale_rw");
+// 	if (opts->discard)
+// 		seq_puts(m, ",discard");
+// 	if (opts->dos1xfloppy)
+// 		seq_puts(m, ",dos1xfloppy");
 
-	return 0;
-}
+// 	return 0;
+// }
 
 static struct dentry *ddfs_fh_to_dentry(struct super_block *sb, struct fid *fid,
 					int fh_len, int fh_type)
