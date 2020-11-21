@@ -12,6 +12,7 @@
 
 #define DDFS_SUPER_MAGIC 0xddf5
 #define DDFS_CLUSTER_UNUSED 0
+#define DDFS_CLUSTER_NOT_ASSIGNED 0xfffffffe
 #define DDFS_CLUSTER_EOF 0xffffffff
 
 #define DDFS_PART_NAME 1
@@ -1036,10 +1037,12 @@ static long ddfs_add_dir_entry(struct inode *dir, const struct qstr *qname,
 		goto fail_io;
 	}
 
-	*parts_ptrs.first_cluster.ptr = DDFS_CLUSTER_UNUSED;
+	*parts_ptrs.first_cluster.ptr = DDFS_CLUSTER_NOT_ASSIGNED;
 	mark_buffer_dirty_inode(parts_ptrs.first_cluster.bh, dir);
 
 	*de = ddfs_make_dir_entry(&parts_ptrs);
+	de->attributes = DDFS_FILE_ATTR;
+	de->size = 0;
 
 	release_dir_entries(&parts_ptrs,
 			    DDFS_PART_NAME | DDFS_PART_FIRST_CLUSTER);
