@@ -15,3 +15,6 @@ stop copypasting and try to do something alone, based on fat
 2020-11-21 17:54:47 mounting did not fuck up system for the first time \o/
     and I can even rmmod ddfs ^^
 
+2020-11-21 19:36:19 mounted for the first time without error
+
+
