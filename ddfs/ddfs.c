@@ -24,6 +24,8 @@
 #define DDFS_FILE_ATTR 1
 #define DDFS_DIR_ATTR 2
 
+#define DDFS_DEFAULT_MODE ((umode_t)(S_IRUGO | S_IWUGO | SIXUGO))
+
 #define dd_print(...)                                                          \
 	do {                                                                   \
 		printk(KERN_INFO "-------------------[DDFS]: " __VA_ARGS__);   \
@@ -1785,7 +1787,7 @@ static inline umode_t ddfs_make_mode(struct ddfs_sb_info *sbi, u8 attrs,
 {
 	if (attrs & DDFS_DIR_ATTR) {
 		// return (mode & ~sbi->options.fs_dmask) | S_IFDIR;
-		return S_IFDIR;
+		return DDFS_DEFAULT_MODE | S_ISDIR;
 	}
 
 	return 0;
