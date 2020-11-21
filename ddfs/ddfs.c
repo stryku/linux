@@ -1771,6 +1771,7 @@ static int ddfs_fill_super(struct super_block *sb, void *data, int silent)
 	sbi->blocks_per_cluster = boot_sector.sectors_per_cluster;
 
 	mutex_init(&sbi->s_lock);
+	sbi->dir_ops = (void *)0xff; // Todo: fix
 	sbi->cluster_size = sb->s_blocksize * sbi->blocks_per_cluster;
 	sbi->number_of_table_entries = boot_sector.number_of_clusters;
 	sbi->table_offset = sbi->cluster_size;
@@ -1811,6 +1812,7 @@ static int ddfs_fill_super(struct super_block *sb, void *data, int silent)
 	dd_print("calling ddfs_read_root");
 	error = ddfs_read_root(root_inode);
 	if (error) {
+		iput(root_inode);
 		dd_print("ddfs_read_root failed with: %ld", error);
 		goto out_fail;
 	}
