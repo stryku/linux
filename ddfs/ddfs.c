@@ -411,6 +411,9 @@ access_dir_entries(struct inode *dir, unsigned entry_index, unsigned part_flags)
 			(DDFS_DIR_ENTRY_FIRST_CLUSTER_TYPE *)ptr;
 	}
 
+	dd_print("access_dir_entries: dir: %p, entry_index: %d, part_flags: %u",
+		 dir, entry_index, part_flags);
+
 	return result;
 }
 
