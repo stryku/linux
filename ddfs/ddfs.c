@@ -1612,7 +1612,9 @@ struct ddfs_boot_sector {
 long ddfs_read_boot_sector(struct super_block *sb, void *data,
 			   struct ddfs_boot_sector *boot_sector)
 {
+	dd_print("ddfs_read_boot_sector");
 	memcpy(boot_sector, data, sizeof(struct ddfs_boot_sector));
+	dd_print("~ddfs_read_boot_sector");
 	return 0;
 }
 
@@ -1644,9 +1646,14 @@ static int ddfs_fill_super(struct super_block *sb, void *data, int silent)
 	struct buffer_head *bh;
 	struct ddfs_boot_sector boot_sector;
 
+	dd_print("init_ddfs_fs");
+
 	sbi = kzalloc(sizeof(struct ddfs_sb_info), GFP_KERNEL);
-	if (!sbi)
+	if (!sbi) {
+		dd_error("kzalloc of sbi failed");
+		dd_print("~init_ddfs_fs");
 		return -ENOMEM;
+	}
 	sb->s_fs_info = sbi;
 
 	sb->s_flags |= SB_NODIRATIME;
@@ -1708,11 +1715,14 @@ static int ddfs_fill_super(struct super_block *sb, void *data, int silent)
 		sbi->size_entries_offset +
 		sbi->entries_per_cluster * sizeof(DDFS_DIR_ENTRY_SIZE_TYPE);
 
-	return -EINVAL;
+	dd_print("~init_ddfs_fs");
+
+	return 0;
 
 out_fail:
 	sb->s_fs_info = NULL;
 	kfree(sbi);
+	dd_print("~init_ddfs_fs");
 	return error;
 }
 
@@ -1734,13 +1744,13 @@ static struct file_system_type ddfs_fs_type = {
 
 static int __init init_ddfs_fs(void)
 {
-	dd_print("init_ddfs_fs\n");
+	dd_print("init_ddfs_fs");
 	return register_filesystem(&ddfs_fs_type);
 }
 
 static void __exit exit_ddfs_fs(void)
 {
-	dd_print("exit_ddfs_fs\n");
+	dd_print("exit_ddfs_fs");
 	unregister_filesystem(&ddfs_fs_type);
 }
 
