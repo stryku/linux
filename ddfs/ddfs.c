@@ -435,21 +435,60 @@ access_dir_entries(struct inode *dir, unsigned entry_index, unsigned part_flags)
 static inline void release_dir_entries(const struct dir_entry_ptrs *ptrs,
 				       unsigned part_flags)
 {
+	struct buffer_head *hydra[4];
+	unsigned counter = 0;
+	int already_freed = 0;
+	int i;
+
 	dd_print("release_dir_entries: ptrs: %p, part_flags: %u", ptrs,
 		 part_flags);
 	dump_dir_entry_ptrs(ptrs);
 
 	if (part_flags & DDFS_PART_NAME && ptrs->name.bh) {
 		brelse(ptrs->name.bh);
+		hydra[counter++] = ptrs->name.bh;
 	}
+
 	if (part_flags & DDFS_PART_ATTRIBUTES && ptrs->attributes.bh) {
-		brelse(ptrs->attributes.bh);
+		already_freed = 0;
+		for (i = 0; i < counter; ++i) {
+			if (hydra[i] == ptrs->attributes.bh) {
+				already_freed = 1;
+				break;
+			}
+		}
+		if (!already_freed) {
+			brelse(ptrs->attributes.bh);
+			hydra[counter++] = ptrs->attributes.bh;
+		}
 	}
+
 	if (part_flags & DDFS_PART_SIZE && ptrs->size.bh) {
-		brelse(ptrs->size.bh);
+		already_freed = 0;
+		for (i = 0; i < counter; ++i) {
+			if (hydra[i] == ptrs->size.bh) {
+				already_freed = 1;
+				break;
+			}
+		}
+		if (!already_freed) {
+			brelse(ptrs->size.bh);
+			hydra[counter++] = ptrs->size.bh;
+		}
 	}
+
 	if (part_flags & DDFS_PART_FIRST_CLUSTER && ptrs->first_cluster.bh) {
-		brelse(ptrs->first_cluster.bh);
+		already_freed = 0;
+		for (i = 0; i < counter; ++i) {
+			if (hydra[i] == ptrs->first_cluster.bh) {
+				already_freed = 1;
+				break;
+			}
+		}
+		if (!already_freed) {
+			brelse(ptrs->first_cluster.bh);
+			hydra[counter++] = ptrs->first_cluster.bh;
+		}
 	}
 }
 
