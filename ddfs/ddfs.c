@@ -842,11 +842,10 @@ static long ddfs_add_dir_entry(struct inode *dir, const struct qstr *qname)
 	const struct dir_entry_offsets offsets =
 		calc_dir_entry_offsets(dir, new_entry_index);
 
-	lock_data(sbi);
-
 	const struct dir_entry_ptrs parts_ptrs = access_dir_entries(
 		dir, new_entry_index, DDFS_PART_NAME | DDFS_PART_FIRST_CLUSTER);
 
+	// Set name
 	if (!parts_ptrs.name.bh) {
 		dd_error("unable to read inode block for name (i_pos %lld)",
 			 i_pos);
@@ -863,6 +862,7 @@ static long ddfs_add_dir_entry(struct inode *dir, const struct qstr *qname)
 
 	mark_buffer_dirty_inode(parts_ptrs.name.bh, dir);
 
+	// Set first cluster
 	if (!parts_ptrs.first_cluster.bh) {
 		dd_error(
 			"unable to read inode block for first_cluster (i_pos %lld)",
@@ -876,8 +876,6 @@ static long ddfs_add_dir_entry(struct inode *dir, const struct qstr *qname)
 	release_dir_entries(&parts_ptrs,
 			    DDFS_PART_NAME | DDFS_PART_FIRST_CLUSTER);
 
-	unlock_data(sbi);
-
 	return 0;
 
 fail_io:
@@ -885,7 +883,6 @@ fail_io:
 	release_dir_entries(&parts_ptrs,
 			    DDFS_PART_NAME | DDFS_PART_FIRST_CLUSTER);
 
-	unlock_data(sbi);
 	return -EIO;
 }
 
@@ -893,33 +890,35 @@ static int ddfs_create(struct inode *dir, struct dentry *dentry, umode_t mode,
 		       bool excl)
 {
 	struct super_block *sb = dir->i_sb;
+	struct ddfs_super_block_info *sbi = DDFS_SB(sb);
 	struct inode *inode;
 	struct fat_slot_info slot_info;
 	struct timespec64 ts;
 	int err;
 
-	mutex_lock(&DDFS_SB(sb)->s_lock);
+	lock_data(sbi);
 
-	ts = current_time(dir);
+	// ts = current_time(dir);
 	// err = vfat_add_entry(dir, &dentry->d_name, 0, 0, &ts, &slot_info);
 	err = ddfs_add_dir_entry(dir, &dentry->d_name);
-	if (err)
-		goto out;
-	inode_inc_iversion(dir);
-
-	inode = fat_build_inode(sb, sinfo.de, sinfo.i_pos);
-	brelse(sinfo.bh);
-	if (IS_ERR(inode)) {
-		err = PTR_ERR(inode);
+	if (err) {
 		goto out;
 	}
-	inode_inc_iversion(inode);
-	fat_truncate_time(inode, &ts, S_ATIME | S_CTIME | S_MTIME);
-	/* timestamp is already written, so mark_inode_dirty() is unneeded. */
+	inode_inc_iversion(dir);
 
-	d_instantiate(dentry, inode);
+	// inode = fat_build_inode(sb, sinfo.de, sinfo.i_pos);
+	// brelse(sinfo.bh);
+	// if (IS_ERR(inode)) {
+	// 	err = PTR_ERR(inode);
+	// 	goto out;
+	// }
+	// inode_inc_iversion(inode);
+	// fat_truncate_time(inode, &ts, S_ATIME | S_CTIME | S_MTIME);
+	// /* timestamp is already written, so mark_inode_dirty() is unneeded. */
+
+	// d_instantiate(dentry, inode);
 out:
-	mutex_unlock(&DDFS_SB(sb)->s_lock);
+	unlock_data(sbi);
 	return err;
 }
 
