@@ -148,6 +148,31 @@ struct dir_entry_offsets {
 	struct dir_entry_part_offsets first_cluster;
 };
 
+void dump_dir_entry_offsets(struct dir_entry_offsets *offsets)
+{
+	dd_print("dump_dir_entry_offsets: %p", offsets);
+
+	dd_print("\t\toffsets->name.block_on_devide: %u",
+		 offsets->name.block_on_devide);
+	dd_print("\t\toffsets->name.offset_on_block: %u",
+		 offsets->name.offset_on_block);
+
+	dd_print("\t\toffsets->attributes.block_on_devide: %u",
+		 offsets->attributes.block_on_devide);
+	dd_print("\t\toffsets->attributes.offset_on_block: %u",
+		 offsets->attributes.offset_on_block);
+
+	dd_print("\t\toffsets->size.block_on_devide: %u",
+		 offsets->size.block_on_devide);
+	dd_print("\t\toffsets->size.offset_on_block: %u",
+		 offsets->size.offset_on_block);
+
+	dd_print("\t\toffsets->first_cluster.block_on_devide: %u",
+		 offsets->first_cluster.block_on_devide);
+	dd_print("\t\toffsets->first_cluster.offset_on_block: %u",
+		 offsets->first_cluster.offset_on_block);
+}
+
 static inline struct dir_entry_part_offsets
 calc_dir_entry_part_offsets(struct inode *dir, unsigned entry_index,
 			    unsigned entries_offset_on_cluster,
@@ -244,6 +269,23 @@ struct dir_entry_ptrs {
 		struct buffer_head *bh;
 	} first_cluster;
 };
+
+void dump_dir_entry_ptrs(struct dir_entry_ptrs *ptrs)
+{
+	dd_print("dump_dir_entry_ptrs: %p", ptrs);
+	dd_print("\t\tptrs->error: %dl", ptrs->error);
+	dd_print("\t\tptrs->name.ptr: %p", ptrs->name.ptr);
+	dd_print("\t\tptrs->name.bh: %p", ptrs->name.bh);
+
+	dd_print("\t\tptrs->attributes.ptr: %p", ptrs->attributes.ptr);
+	dd_print("\t\tptrs->attributes.bh: %p", ptrs->attributes.bh);
+
+	dd_print("\t\tptrs->size.ptr: %p", ptrs->size.ptr);
+	dd_print("\t\tptrs->size.bh: %p", ptrs->size.bh);
+
+	dd_print("\t\tptrs->first_cluster.ptr: %p", ptrs->first_cluster.ptr);
+	dd_print("\t\tptrs->first_cluster.bh: %p", ptrs->first_cluster.bh);
+}
 
 static inline struct dir_entry_ptrs
 access_dir_entries(struct inode *dir, unsigned entry_index, unsigned part_flags)
@@ -1143,6 +1185,9 @@ static int ddfs_find(struct inode *dir, const char *name,
 	     ++entry_index) {
 		const struct dir_entry_ptrs entry_ptrs =
 			access_dir_entries(dir, entry_index, DDFS_PART_NAME);
+
+		dd_print("entry_index: %d", entry_index);
+		dump_dir_entry_ptrs(&entry_ptrs);
 
 		int i;
 		for (i = 0; i < 4; ++i) {
