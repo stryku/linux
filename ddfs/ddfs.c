@@ -98,7 +98,7 @@ static inline void dump_ddfs_dir_entry(const struct ddfs_dir_entry *entry)
 	dd_print("\t\tentry->entry_index %u", entry->entry_index);
 	dd_print("\t\tentry->name %s", entry->name);
 	dd_print("\t\tentry->attributes %u", (unsigned)entry->attributes);
-	dd_print("\t\tentry->size %lu", entry->size);
+	dd_print("\t\tentry->size %llu", entry->size);
 	dd_print("\t\tentry->first_cluster %u", (unsigned)entry->first_cluster);
 }
 
