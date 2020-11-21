@@ -1762,18 +1762,12 @@ int ddfs_getattr(const struct path *path, struct kstat *stat, u32 request_mask,
 		 request_mask, flags);
 	dump_ddfs_inode_info(DDFS_I(inode));
 
+	struct inode *inode = d_inode(path->dentry);
+	generic_fillattr(inode, stat);
+	stat->blksize = DDFS_SB(inode->i_sb)->cluster_size;
+
 	dd_print("~ddfs_getattr 0");
 	return 0;
-
-	// struct inode *inode = d_inode(path->dentry);
-	// generic_fillattr(inode, stat);
-	// stat->blksize = MSDOS_SB(inode->i_sb)->cluster_size;
-
-	// if (MSDOS_SB(inode->i_sb)->options.nfs == FAT_NFS_NOSTALE_RO) {
-	// 	/* Use i_pos for ino. This is used as fileid of nfs. */
-	// 	stat->ino = fat_i_pos_read(MSDOS_SB(inode->i_sb), inode);
-	// }
-	// return 0;
 }
 // EXPORT_SYMBOL_GPL(ddfs_getattr);
 
@@ -1812,7 +1806,7 @@ static const struct inode_operations ddfs_dir_inode_operations = {
 	.rmdir = ddfs_rmdir,
 	.rename = ddfs_rename,
 	.setattr = ddfs_setattr,
-	// .getattr = ddfs_getattr,
+	.getattr = ddfs_getattr,
 	.update_time = ddfs_update_time,
 };
 
