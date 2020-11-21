@@ -984,7 +984,6 @@ static long ddfs_add_dir_entry(struct inode *dir, const struct qstr *qname,
 	// Todo: handle no space on cluster
 
 	const unsigned new_entry_index = dd_idir->number_of_entries;
-	++dd_idir->number_of_entries;
 
 	const struct dir_entry_ptrs parts_ptrs = access_dir_entries(
 		dir, new_entry_index, DDFS_PART_NAME | DDFS_PART_FIRST_CLUSTER);
@@ -993,6 +992,8 @@ static long ddfs_add_dir_entry(struct inode *dir, const struct qstr *qname,
 	dd_print("ddfs_add_dir_entry, dir: %p, name: %s, de: %p", dir,
 		 (const char *)qname->name, de);
 	dump_dir_entry_ptrs(&parts_ptrs);
+
+	++dd_idir->number_of_entries;
 
 	// Set name
 	if (!parts_ptrs.name.bh) {
