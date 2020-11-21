@@ -17,5 +17,6 @@ stop copypasting and try to do something alone, based on fat
 
 2020-11-21 19:36:19 mounted for the first time without error
 2020-11-21 21:12:09 mounted for real. Can cd there lol
+2020-11-21 22:13:36 fixed name lookup
 
 

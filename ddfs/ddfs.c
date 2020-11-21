@@ -984,10 +984,15 @@ static long ddfs_add_dir_entry(struct inode *dir, const struct qstr *qname,
 	// Todo: handle no space on cluster
 
 	const unsigned new_entry_index = dd_idir->number_of_entries;
+	++dd_idir->number_of_entries;
 
 	const struct dir_entry_ptrs parts_ptrs = access_dir_entries(
 		dir, new_entry_index, DDFS_PART_NAME | DDFS_PART_FIRST_CLUSTER);
 	int i;
+
+	dd_print("ddfs_add_dir_entry, dir: %p, name: %s, de: %p", dir,
+		 (const char *)qname->name, de);
+	dump_dir_entry_ptrs(&parts_ptrs);
 
 	// Set name
 	if (!parts_ptrs.name.bh) {
@@ -995,6 +1000,7 @@ static long ddfs_add_dir_entry(struct inode *dir, const struct qstr *qname,
 		goto fail_io;
 	}
 
+	dd_print("assigning name");
 	for (i = 0; i < DDFS_DIR_ENTRY_NAME_CHARS_IN_PLACE; ++i) {
 		parts_ptrs.name.ptr[i] = qname->name[i];
 		if (!qname->name[i]) {
@@ -1002,6 +1008,7 @@ static long ddfs_add_dir_entry(struct inode *dir, const struct qstr *qname,
 		}
 	}
 
+	dd_print("calling mark_buffer_dirty_inode");
 	mark_buffer_dirty_inode(parts_ptrs.name.bh, dir);
 
 	// Set first cluster
@@ -1018,6 +1025,7 @@ static long ddfs_add_dir_entry(struct inode *dir, const struct qstr *qname,
 	release_dir_entries(&parts_ptrs,
 			    DDFS_PART_NAME | DDFS_PART_FIRST_CLUSTER);
 
+	dd_print("~ddfs_add_dir_entry 0");
 	return 0;
 
 fail_io:
@@ -1025,6 +1033,7 @@ fail_io:
 	release_dir_entries(&parts_ptrs,
 			    DDFS_PART_NAME | DDFS_PART_FIRST_CLUSTER);
 
+	dd_print("~ddfs_add_dir_entry error: %d", -EIO);
 	return -EIO;
 }
 
@@ -1131,6 +1140,7 @@ static int ddfs_create(struct inode *dir, struct dentry *dentry, umode_t mode,
 
 	dd_print("ddfs_create, inode: %p, dentry: %p, mode: %u, excl: %d", dir,
 		 dentry, mode, (int)excl);
+	dump_ddfs_inode_info(DDFS_I(dir));
 
 	lock_data(sbi);
 
