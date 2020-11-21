@@ -1646,6 +1646,7 @@ static int ddfs_fill_super(struct super_block *sb, void *data, int silent)
 	long error;
 	struct buffer_head *bh;
 	struct ddfs_boot_sector boot_sector;
+	struct inode *root_inode;
 
 	dd_print("ddfs_fill_super");
 
@@ -1715,6 +1716,27 @@ static int ddfs_fill_super(struct super_block *sb, void *data, int silent)
 	sbi->first_cluster_entries_offset =
 		sbi->size_entries_offset +
 		sbi->entries_per_cluster * sizeof(DDFS_DIR_ENTRY_SIZE_TYPE);
+
+	// Make root inode
+	dd_print("Making root inode");
+	root_inode = new_inode(sb);
+	if (!root_inode) {
+		dd_print("new_inode for root node failed");
+		goto out_fail;
+	}
+	dd_print("root_inode ptr: %p", root_inode);
+
+	root_inode->i_ino = 1;
+	dd_print("calling inode_set_iversion(root_inode, 1)");
+	inode_set_iversion(root_inode, 1);
+	sb->s_root = d_make_root(root_inode);
+	if (!sb->s_root) {
+		dd_print("d_make_root root inode failed");
+		goto out_fail;
+	}
+
+	dd_print("making root_inode success. root_inode: %p, sb->s_root: %p",
+		 root_inode, sb->s_root);
 
 	dd_print("~ddfs_fill_super 0");
 
