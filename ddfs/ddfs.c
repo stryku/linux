@@ -64,6 +64,17 @@ struct ddfs_inode_info {
 	struct inode ddfs_inode; // Todo: Should be named vfs_inode
 };
 
+void dump_ddfs_inode_info(struct ddfs_inode_info *info)
+{
+	dd_print("dump_ddfs_inode_info, info: %p", info);
+	dd_print("\t\tinfo->dentry_index: %u", info->dentry_index);
+	dd_print("\t\tinfo->number_of_entries: %u", info->number_of_entries);
+	dd_print("\t\tinfo->i_start: %d", info->i_start);
+	dd_print("\t\tinfo->i_logstart: %d", info->i_logstart);
+	dd_print("\t\tinfo->i_attrs: %d", info->i_attrs);
+	dd_print("\t\tinfo->i_pos: %ul", info->i_pos);
+}
+
 #define DDFS_DIR_ENTRY_NAME_TYPE __u8
 #define DDFS_DIR_ENTRY_ATTRIBUTES_TYPE __u8
 #define DDFS_DIR_ENTRY_SIZE_TYPE __u64
@@ -1116,7 +1127,12 @@ out:
 static int ddfs_find(struct inode *dir, const char *name,
 		     struct ddfs_dir_entry *dest_de)
 {
+	dd_print("ddfs_find, dir: %p, name: %s, dest_de: %p", dir, name,
+		 dest_de);
+
 	struct ddfs_inode_info *dd_dir = DDFS_I(dir);
+
+	dump_ddfs_inode_info(dd_dir);
 	// const unsigned int len = vfat_striptail_len(qname);
 	// if (len == 0 || len > 4) {
 	// 	return -ENOENT;
@@ -1131,7 +1147,9 @@ static int ddfs_find(struct inode *dir, const char *name,
 		int i;
 		for (i = 0; i < 4; ++i) {
 			if (entry_ptrs.name.ptr[i] == name[i] &&
-			    !entry_ptrs.name.ptr[i]) {
+			    entry_ptrs.name.ptr[i] == '\0') {
+				dd_print("found entry at: %d", entry_index);
+
 				memcpy(dest_de->name, entry_ptrs.name.ptr, i);
 				dest_de->entry_index = entry_index;
 				dest_de->size = *entry_ptrs.size.ptr;
@@ -1142,6 +1160,8 @@ static int ddfs_find(struct inode *dir, const char *name,
 
 				release_dir_entries(&entry_ptrs,
 						    DDFS_PART_NAME);
+
+				dd_print("~ddfs_find 0");
 				return 0;
 			}
 
@@ -1153,6 +1173,7 @@ static int ddfs_find(struct inode *dir, const char *name,
 		release_dir_entries(&entry_ptrs, DDFS_PART_NAME);
 	}
 
+	dd_print("~ddfs_find %d", -ENOENT);
 	return -ENOENT;
 }
 
