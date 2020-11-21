@@ -420,6 +420,10 @@ access_dir_entries(struct inode *dir, unsigned entry_index, unsigned part_flags)
 static inline void release_dir_entries(const struct dir_entry_ptrs *ptrs,
 				       unsigned part_flags)
 {
+	dd_print("release_dir_entries: ptrs: %p, part_flags: %u", ptrs,
+		 part_flags);
+	dump_dir_entry_ptrs(ptrs);
+
 	if (part_flags & DDFS_PART_NAME && ptrs->name.bh) {
 		brelse(ptrs->name.bh);
 	}
