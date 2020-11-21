@@ -1169,10 +1169,10 @@ out:
 static int ddfs_find(struct inode *dir, const char *name,
 		     struct ddfs_dir_entry *dest_de)
 {
+	struct ddfs_inode_info *dd_dir = DDFS_I(dir);
+
 	dd_print("ddfs_find, dir: %p, name: %s, dest_de: %p", dir, name,
 		 dest_de);
-
-	struct ddfs_inode_info *dd_dir = DDFS_I(dir);
 
 	dump_ddfs_inode_info(dd_dir);
 	// const unsigned int len = vfat_striptail_len(qname);
@@ -1234,6 +1234,10 @@ static struct dentry *ddfs_lookup(struct inode *dir, struct dentry *dentry,
 
 	lock_data(sbi);
 
+	dd_print("ddfs_lookup: dir: %p, dentry: %p, flags: %u", dir, dentry,
+		 flags);
+	dump_ddfs_inode_info(DDFS_I(dir));
+
 	err = ddfs_find(dir, (const char *)(&dentry->d_name.name), &de);
 	if (err) {
 		if (err == -ENOENT) {
@@ -1274,9 +1278,11 @@ static struct dentry *ddfs_lookup(struct inode *dir, struct dentry *dentry,
 
 out:
 	unlock_data(sbi);
+	dd_print("~ddfs_lookup, inode: %p", inode);
 	return d_splice_alias(inode, dentry);
 error:
 	unlock_data(sbi);
+	dd_print("~ddfs_lookup error: %p", ERR_PTR(err));
 	return ERR_PTR(err);
 }
 
