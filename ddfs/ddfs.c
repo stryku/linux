@@ -98,6 +98,99 @@ static inline struct ddfs_sb_info *DDFS_SB(struct super_block *sb)
 	return sb->s_fs_info;
 }
 
+struct dir_entry_part_offsets {
+	unsigned block_on_device;
+	unsigned offset_on_block;
+};
+
+struct dir_entry_offsets {
+	/*
+	entry index
+	block on device
+	offset on block
+	*/
+
+	unsigned entry_index;
+
+	struct dir_entry_part_offsets name;
+	struct dir_entry_part_offsets attributes;
+	struct dir_entry_part_offsets size;
+	struct dir_entry_part_offsets first_cluster;
+};
+
+static inline struct dir_entry_part_offsets
+calc_dir_entry_part_offsets(struct inode *dir, unsigned entry_index,
+			    unsigned entries_offset_on_cluster,
+			    unsigned entry_part_size)
+{
+	const struct super_block *sb = dir->s_sb;
+	const struct ddfs_super_block_info *sbi = DDFS_SB(sb);
+	const struct ddfs_inode_info *dd_idir = DDFS_I(dir);
+
+	const unsigned entry_index_on_cluster =
+		entry_index % sbi->entries_per_cluster;
+
+	// Logical cluster no on which the entry lays
+	const unsigned entry_logic_cluster_no =
+		dd_idir->i_logstart + (entry_index / sbi->entries_per_cluster);
+
+	// The entry part offset on cluster. In bytes.
+	const unsigned offset_on_cluster =
+		entries_offset_on_cluster +
+		entry_index_on_cluster * entry_part_size;
+
+	// The entry part block on cluster
+	const unsigned entry_part_block_no_on_logic_cluster =
+		offset_on_cluster / sb->block_size;
+
+	// The entry part block no on device.
+	const unsigned entry_part_block_no_on_device =
+		(sbi->data_cluster_no + entry_logic_cluster_no) *
+			sb->sec_per_clus +
+		entry_part_block_no_on_logic_cluster;
+
+	// The entry part offset on block. In bytes.
+	const unsigned entry_part_offset_on_block =
+		offset_on_cluster % sb->block_size;
+
+	const struct dir_entry_part_offsets result = {
+		.block_on_device = entry_part_block_no_on_device,
+		.offset_on_block = entry_part_offset_on_block
+	};
+
+	return result;
+}
+
+struct dir_entry_offsets calc_dir_entry_offsets(struct inode *dir,
+						unsigned entry_index)
+{
+	struct super_block *sb = dir->s_sb;
+	struct ddfs_super_block_info sbi = DDFS_SB(sb);
+
+	const struct dir_entry_offsets result = {
+		.entry_index = entry_index,
+
+		.name = calc_dir_entry_part_offsets(
+			dir, entry_index, sbi->name_entries_offset,
+			sizeof(DDFS_DIR_ENTRY_NAME_TYPE) *
+				DDFS_DIR_ENTRY_NAME_CHARS_IN_PLACE),
+
+		.attributes = calc_dir_entry_part_offsets(
+			dir, entry_index, sbi->attributes_entries_offset,
+			sizeof(DDFS_DIR_ENTRY_ATTRIBUTES_TYPE)),
+
+		.size = calc_dir_entry_part_offsets(
+			dir, entry_index, sbi->size_entries_offset,
+			sizeof(DDFS_DIR_ENTRY_SIZE_TYPE)),
+
+		.first_cluster = calc_dir_entry_part_offsets(
+			dir, entry_index, sbi->first_cluster_entries_offset,
+			sizeof(DDFS_DIR_ENTRY_FIRST_CLUSTER_TYPE))
+	};
+
+	return result;
+}
+
 static struct kmem_cache *ddfs_inode_cachep;
 
 static struct inode *ddfs_alloc_inode(struct super_block *sb)
