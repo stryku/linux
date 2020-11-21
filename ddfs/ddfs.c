@@ -948,8 +948,8 @@ struct inode *ddfs_build_inode(struct super_block *sb,
 		inode = ERR_PTR(err);
 		goto out;
 	}
-	fat_attach(inode, i_pos);
-	insert_inode_hash(inode);
+	// fat_attach(inode, i_pos);
+	// insert_inode_hash(inode);
 
 out:
 	unlock_inode_build(MSDOS_SB(sb));
@@ -983,7 +983,7 @@ static int ddfs_create(struct inode *dir, struct dentry *dentry, umode_t mode,
 		goto out;
 	}
 	inode_inc_iversion(inode);
-	fat_truncate_time(inode, &ts, S_ATIME | S_CTIME | S_MTIME);
+	// fat_truncate_time(inode, &ts, S_ATIME | S_CTIME | S_MTIME);
 	/* timestamp is already written, so mark_inode_dirty() is unneeded. */
 
 	d_instantiate(dentry, inode);
