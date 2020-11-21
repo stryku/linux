@@ -355,29 +355,35 @@ static int ddfs_free(struct inode *inode, int skip)
 	return 0;
 }
 
+int ddfs_flush_inodes(struct super_block *sb, struct inode *i1,
+		      struct inode *i2)
+{
+	int ret = 0;
+	if (!DDFS_SB(sb)->options.flush)
+		return 0;
+	if (i1)
+		ret = writeback_inode(i1);
+	if (!ret && i2)
+		ret = writeback_inode(i2);
+	if (!ret) {
+		struct address_space *mapping = sb->s_bdev->bd_inode->i_mapping;
+		ret = filemap_flush(mapping);
+	}
+	return ret;
+}
+
 void ddfs_truncate_blocks(struct inode *inode, loff_t offset)
 {
 	struct ddfs_sb_info *sbi = DDFS_SB(inode->i_sb);
-	int nr_clusters;
-
-	/*
-	 * This protects against truncating a file bigger than it was then
-	 * trying to write into the hole.
-	 */
-	if (MSDOS_I(inode)->mmu_private > offset)
-		MSDOS_I(inode)->mmu_private = offset;
-
-	nr_clusters = (offset + (sbi->cluster_size - 1)) / sbi->cluster_size;
-
-	fat_free(inode, nr_clusters);
-	fat_flush_inodes(inode->i_sb, inode, NULL);
+	ddfs_free(inode, 0);
+	ddfs_flush_inodes(inode->i_sb, inode, NULL);
 }
 
 static void ddfs_evict_inode(struct inode *inode)
 {
 	truncate_inode_pages_final(&inode->i_data);
 
-	fat_truncate_blocks(inode, 0);
+	ddfs_truncate_blocks(inode, 0);
 
 	// if (!inode->i_nlink) {
 	// 	inode->i_size = 0;
