@@ -403,48 +403,36 @@ static void ddfs_put_super(struct super_block *sb)
 	// Todo: put table inode
 }
 
-static int ddfs_statfs(struct dentry *dentry, struct kstatfs *buf)
-{
-	struct super_block *sb = dentry->d_sb;
-	struct msdos_sb_info *sbi = MSDOS_SB(sb);
-	u64 id = huge_encode_dev(sb->s_bdev->bd_dev);
+// Todo: implement?
+// static int ddfs_statfs(struct dentry *dentry, struct kstatfs *buf)
+// {
+// 	struct super_block *sb = dentry->d_sb;
+// 	struct ddfs_sb_info *sbi = DDFS_SB(sb);
+// 	u64 id = huge_encode_dev(sb->s_bdev->bd_dev);
 
-	/* If the count of free cluster is still unknown, counts it here. */
-	if (sbi->free_clusters == -1 || !sbi->free_clus_valid) {
-		int err = fat_count_free_clusters(dentry->d_sb);
-		if (err)
-			return err;
-	}
+// 	/* If the count of free cluster is still unknown, counts it here. */
+// 	if (sbi->free_clusters == -1 || !sbi->free_clus_valid) {
+// 		int err = fat_count_free_clusters(dentry->d_sb);
+// 		if (err)
+// 			return err;
+// 	}
 
-	buf->f_type = dentry->d_sb->s_magic;
-	buf->f_bsize = sbi->cluster_size;
-	buf->f_blocks = sbi->max_cluster - FAT_START_ENT;
-	buf->f_bfree = sbi->free_clusters;
-	buf->f_bavail = sbi->free_clusters;
-	buf->f_fsid.val[0] = (u32)id;
-	buf->f_fsid.val[1] = (u32)(id >> 32);
-	buf->f_namelen =
-		(sbi->options.isvfat ? FAT_LFN_LEN : 12) * NLS_MAX_CHARSET_SIZE;
+// 	buf->f_type = dentry->d_sb->s_magic;
+// 	buf->f_bsize = sbi->cluster_size;
+// 	buf->f_blocks = sbi->max_cluster - FAT_START_ENT;
+// 	buf->f_bfree = sbi->free_clusters;
+// 	buf->f_bavail = sbi->free_clusters;
+// 	buf->f_fsid.val[0] = (u32)id;
+// 	buf->f_fsid.val[1] = (u32)(id >> 32);
+// 	buf->f_namelen =
+// 		(sbi->options.isvfat ? FAT_LFN_LEN : 12) * NLS_MAX_CHARSET_SIZE;
 
-	return 0;
-}
+// 	return 0;
+// }
 
 static int ddfs_remount(struct super_block *sb, int *flags, char *data)
 {
-	bool new_rdonly;
-	struct msdos_sb_info *sbi = MSDOS_SB(sb);
-	*flags |= SB_NODIRATIME | (sbi->options.isvfat ? 0 : SB_NOATIME);
-
 	sync_filesystem(sb);
-
-	/* make sure we update state on remount. */
-	new_rdonly = *flags & SB_RDONLY;
-	if (new_rdonly != sb_rdonly(sb)) {
-		if (new_rdonly)
-			fat_set_state(sb, 0, 0);
-		else
-			fat_set_state(sb, 1, 1);
-	}
 	return 0;
 }
 
@@ -455,7 +443,7 @@ static const struct super_operations ddfs_sops = {
 	.write_inode = ddfs_write_inode,
 	.evict_inode = ddfs_evict_inode,
 	.put_super = ddfs_put_super,
-	.statfs = ddfs_statfs,
+	// .statfs = ddfs_statfs,
 	.remount_fs = ddfs_remount,
 
 	.show_options = ddfs_show_options,
