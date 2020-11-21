@@ -84,19 +84,20 @@ static void ddfs_free_inode(struct inode *inode)
 	kmem_cache_free(ddfs_inode_cachep, MSDOS_I(inode));
 }
 
-static inline loff_t ddfs_i_pos_read(struct msdos_sb_info *sbi,
-				     struct inode *inode)
-{
-	loff_t i_pos;
-#if BITS_PER_LONG == 32
-	spin_lock(&sbi->inode_hash_lock);
-#endif
-	i_pos = DDFS_I(inode)->i_pos;
-#if BITS_PER_LONG == 32
-	spin_unlock(&sbi->inode_hash_lock);
-#endif
-	return i_pos;
-}
+// static inline loff_t ddfs_i_pos_read(struct ddfs_sb_info *sbi,
+// 				     struct inode *inode)
+// {
+// 	return DDFS_I(inode)->i_pos;
+// 	// 	loff_t i_pos;
+// 	// #if BITS_PER_LONG == 32
+// 	// 	spin_lock(&sbi->inode_hash_lock);
+// 	// #endif
+// 	// 	i_pos = DDFS_I(inode)->i_pos;
+// 	// #if BITS_PER_LONG == 32
+// 	// 	spin_unlock(&sbi->inode_hash_lock);
+// 	// #endif
+// 	// 	return i_pos;
+// }
 
 /* Convert linear UNIX date to a FAT time/date pair. */
 void fat_time_unix2fat(struct ddfs_sb_info *sbi, struct timespec64 *ts,
@@ -152,7 +153,8 @@ static int __ddfs_write_inode(struct inode *inode, int wait)
 	int err, offset;
 
 retry:
-	i_pos = ddfs_i_pos_read(sbi, inode);
+	// i_pos = ddfs_i_pos_read(sbi, inode);
+	i_pos = DDFS_I(inode)->i_pos;
 	if (!i_pos) {
 		return 0;
 	}
