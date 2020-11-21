@@ -8,3 +8,6 @@ mount: https://linux.die.net/man/8/mount
 name + attributes
 size
 first_cluster
+
+# Commands
+sudo mount -t ddfs -o loop ddfs.img ./ddfs.dir

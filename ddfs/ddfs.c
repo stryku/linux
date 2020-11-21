@@ -10,7 +10,7 @@
 #include <linux/writeback.h>
 
 #define DDFS_SUPER_MAGIC 0xddf5
-#define DDFS_CLUSTER_UNUSED 0xfffffffe
+#define DDFS_CLUSTER_UNUSED 0
 #define DDFS_CLUSTER_EOF 0xffffffff
 
 #define DDFS_PART_NAME 1
