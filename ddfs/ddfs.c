@@ -1812,7 +1812,7 @@ static const struct inode_operations ddfs_dir_inode_operations = {
 	.rmdir = ddfs_rmdir,
 	.rename = ddfs_rename,
 	.setattr = ddfs_setattr,
-	.getattr = ddfs_getattr,
+	// .getattr = ddfs_getattr,
 	.update_time = ddfs_update_time,
 };
 
