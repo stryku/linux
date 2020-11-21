@@ -1212,7 +1212,7 @@ struct inode *ddfs_build_inode(struct super_block *sb,
 
 out:
 	unlock_inode_build(DDFS_SB(sb));
-	dd_print("~ddfs_fill_inode, inode: %p", inode);
+	dd_print("~ddfs_build_inode, inode: %p", inode);
 	return inode;
 }
 
@@ -1295,7 +1295,8 @@ static int ddfs_find(struct inode *dir, const char *name,
 			    entry_ptrs.name.ptr[i] == '\0') {
 				dd_print("found entry at: %d", entry_index);
 
-				memcpy(dest_de->name, entry_ptrs.name.ptr, i);
+				memcpy(dest_de->name, entry_ptrs.name.ptr,
+				       i + 1);
 				dest_de->entry_index = entry_index;
 				dest_de->size = *entry_ptrs.size.ptr;
 				dest_de->first_cluster =
