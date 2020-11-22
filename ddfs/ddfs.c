@@ -652,9 +652,9 @@ static int __ddfs_write_inode(struct inode *inode, int wait)
 		*entry_ptrs.size.ptr = inode->i_size;
 		*entry_ptrs.attributes.ptr = DDFS_FILE_ATTR;
 
-		// mark_buffer_dirty(entry_ptrs.first_cluster.bh);
-		// mark_buffer_dirty(entry_ptrs.size.bh);
-		// mark_buffer_dirty(entry_ptrs.attributes.bh);
+		mark_buffer_dirty(entry_ptrs.first_cluster.bh);
+		mark_buffer_dirty(entry_ptrs.size.bh);
+		mark_buffer_dirty(entry_ptrs.attributes.bh);
 		if (wait) {
 			// Todo: handle
 			// err = sync_dirty_buffer(bh);
