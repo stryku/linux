@@ -1388,8 +1388,11 @@ static ssize_t ddfs_write(struct file *file, const char __user *u, size_t count,
 	dd_print("writing done");
 
 	dd_print("calling mark_buffer_dirty_inode");
+	inode->i_size = *ppos + count;
 	inode_inc_iversion(inode);
-	mark_buffer_dirty_inode(bh, inode);
+	mark_inode_dirty(inode);
+	mark_buffer_dirty(bh);
+	sync_dirty_buffer(bh);
 
 	dd_print("calling brelse");
 	brelse(bh);
