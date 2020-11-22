@@ -1473,6 +1473,7 @@ int ddfs_fill_inode(struct inode *inode, struct ddfs_dir_entry *de)
 	inode->i_mapping->a_ops = &ddfs_aops;
 	dd_inode->mmu_private = inode->i_size;
 
+	dd_inode->i_attrs = de->attributes;
 	inode->i_blocks = inode->i_size / inode->i_sb->s_blocksize;
 
 	dd_print("filled inode");
