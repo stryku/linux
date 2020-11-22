@@ -1335,7 +1335,7 @@ static ssize_t ddfs_write(struct file *file, const char __user *u, size_t count,
 
 	dd_print("cluster_no to use: %d", cluster_no);
 
-	cluster_on_device = cluster_no + sbi->data_cluster_no;
+	cluster_on_device = cluster_no + sbi->data_cluster_no + 1u;
 	block_on_device = cluster_on_device * sbi->blocks_per_cluster;
 
 	dd_print("cluster_on_device: %u", cluster_on_device);
