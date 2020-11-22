@@ -1260,13 +1260,93 @@ ssize_t ddfs_read(struct file *file, char __user *buf, size_t size,
 	return 0;
 }
 
+int ddfs_find_free_cluster(struct super_block *sb)
+{
+	struct ddfs_sb_info *sbi = DDFS_SB(sb);
+	struct buffer_head *bh;
+	__u32 *clusters;
+	unsigned cluster_no = 0;
+	const unsigned table_block_no = sbi->table_offset / sbi->block_size;
+
+	dd_print("ddfs_find_free_cluster");
+
+	lock_table(sbi);
+	bh = sb_bread(sb, table_block_no);
+	if (!bh) {
+		dd_print("sb_bread failed");
+		// Todo: handle
+	}
+	dd_print("sb_bread succeed");
+
+	clusters = (__u32 *)bh->b_data;
+
+	while (*clusters != DDFS_CLUSTER_UNUSED) {
+		++clusters;
+		++cluster_no;
+	}
+
+	dd_print("found cluster %u", cluster_no);
+	*clusters = DDFS_CLUSTER_EOF;
+
+	brelse(bh);
+	unlock_table(sbi);
+
+	dd_print("~ddfs_find_free_cluster %u", cluster_no);
+	return cluster_no;
+}
+
 static ssize_t ddfs_write(struct file *file, const char __user *u, size_t count,
 			  loff_t *ppos)
 {
+	struct inode *inode = d_inode(file->f_path.dentry);
+	struct ddfs_inode_info *dd_inode = DDFS_I(inode);
+	struct super_block *sb = inode->i_sb;
+	struct ddfs_sb_info *sbi = DDFS_SB(sb);
+	struct buffer_head *bh;
+	char *dest;
+	unsigned cluster_on_device;
+	unsigned block_on_device;
+	int cluster_no = dd_inode->i_logstart;
+
 	dd_print("ddfs_write, file: %p, size: %lu, ppos: %llu", file, count,
 		 *ppos);
 
-		return 3;
+	dd_print("inode: %p", inode);
+	dump_ddfs_inode_info(dd_inode);
+
+	if (cluster_no == DDFS_CLUSTER_NOT_ASSIGNED) {
+		dd_print("no cluster, need to search for a free one");
+		cluster_no = ddfs_find_free_cluster(inode->i_sb);
+		dd_inode->i_logstart = dd_inode->i_start = cluster_no;
+		mark_inode_dirty(inode);
+	}
+
+	dd_print("cluster_no to use: %d", cluster_no);
+
+	cluster_on_device = cluster_no + sbi->table_offset / sbi->cluster_size;
+	block_on_device = cluster_on_device * sbi->blocks_per_cluster;
+
+	dd_print("cluster_on_device: %u", cluster_on_device);
+	dd_print("block_on_device: %u", block_on_device);
+
+	lock_data(sbi);
+
+	bh = sb_bread(sb, block_on_device);
+	if (!bh) {
+		//Todo: handle
+	}
+
+	dest = (char *)bh->b_data;
+	dest += *ppos;
+
+	dd_print("writing data to buffer");
+	memcpy(dest, u, count);
+
+	brelse(bh);
+	unlock_data(sbi);
+
+	dd_print("~ddfs_write %lu", count);
+	return count;
 }
 
 const struct file_operations ddfs_file_operations = {
@@ -1453,8 +1533,10 @@ static int ddfs_find(struct inode *dir, const char *name,
 		dump_dir_entry_ptrs(&entry_ptrs);
 
 		for (i = 0; i < 4; ++i) {
-			if (entry_ptrs.name.ptr[i] == name[i] &&
-			    entry_ptrs.name.ptr[i] == '\0') {
+			if (entry_ptrs.name.ptr[i] != name[i]) {
+				break;
+			}
+			if (entry_ptrs.name.ptr[i] == '\0') {
 				dd_print("found entry at: %d", entry_index);
 
 				memcpy(dest_de->name, entry_ptrs.name.ptr,
