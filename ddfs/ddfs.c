@@ -1326,7 +1326,7 @@ int ddfs_find_free_cluster(struct super_block *sb)
 	*clusters = DDFS_CLUSTER_EOF;
 
 	mark_buffer_dirty(bh);
-	sync_dirty_buffer(bh);
+	// sync_dirty_buffer(bh); // Todo: is it needed?
 	brelse(bh);
 	unlock_table(sbi);
 
@@ -1356,7 +1356,8 @@ static ssize_t ddfs_write(struct file *file, const char __user *u, size_t count,
 	if (cluster_no == DDFS_CLUSTER_NOT_ASSIGNED) {
 		dd_print("no cluster, need to search for a free one");
 		cluster_no = ddfs_find_free_cluster(inode->i_sb);
-		dd_inode->i_logstart = dd_inode->i_start = cluster_no;
+		dd_inode->i_logstart = cluster_no;
+		dd_inode->i_start = dd_inode->i_logstart + 3;
 		inode_inc_iversion(inode);
 		mark_inode_dirty(inode);
 	}
