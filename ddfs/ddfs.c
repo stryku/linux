@@ -627,6 +627,8 @@ retry:
 	// i_pos = ddfs_i_pos_read(sbi, inode);
 	i_pos = dd_inode->i_pos;
 	if (!i_pos) {
+		unlock_data(sbi);
+		dd_print("~__ddfs_write_inode !i_pos 0");
 		return 0;
 	}
 
@@ -636,6 +638,8 @@ retry:
 	if (!bh) {
 		dd_error("unable to read inode block for updating (i_pos %lld)",
 			 i_pos);
+		unlock_data(sbi);
+		dd_print("~__ddfs_write_inode error %d", -EIO);
 		return -EIO;
 	}
 
