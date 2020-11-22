@@ -1288,6 +1288,7 @@ int ddfs_find_free_cluster(struct super_block *sb)
 	dd_print("found cluster %u", cluster_no);
 	*clusters = DDFS_CLUSTER_EOF;
 
+	mark_buffer_dirty(bh);
 	brelse(bh);
 	unlock_table(sbi);
 
@@ -1342,6 +1343,7 @@ static ssize_t ddfs_write(struct file *file, const char __user *u, size_t count,
 	dd_print("writing data to buffer");
 	memcpy(dest, u, count);
 
+	mark_buffer_dirty(bh);
 	brelse(bh);
 	unlock_data(sbi);
 
