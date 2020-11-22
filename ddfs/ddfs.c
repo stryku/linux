@@ -1275,12 +1275,16 @@ ssize_t ddfs_read(struct file *file, char __user *buf, size_t size,
 	dd_print("ddfs_read, file: %p, size: %lu, ppos: %llu", file, size,
 		 *ppos);
 
+	dump_ddfs_inode_info(dd_inode);
+
 	lock_data(sbi);
 
 	bh = sb_bread(sb, block_on_device);
 	if (!bh) {
+		dd_print("sb_read failed");
 		//todo: handle
 	}
+	dd_print("sb_read succeed");
 
 	data_ptr = (char *)bh->b_data;
 	data_ptr += *ppos;
