@@ -1268,7 +1268,7 @@ ssize_t ddfs_read(struct file *file, char __user *buf, size_t size,
 	struct super_block *sb = inode->i_sb;
 	struct ddfs_sb_info *sbi = DDFS_SB(sb);
 	struct buffer_head *bh;
-	unsigned cluster_no = dd_inode->i_logstart;
+	unsigned cluster_no = dd_inode->i_logstart + 3;
 	unsigned block_on_device = cluster_no * sbi->blocks_per_cluster;
 	char *data_ptr;
 
@@ -1326,7 +1326,7 @@ int ddfs_find_free_cluster(struct super_block *sb)
 	*clusters = DDFS_CLUSTER_EOF;
 
 	mark_buffer_dirty(bh);
-	// sync_dirty_buffer(bh); // Todo: is it needed?
+	sync_dirty_buffer(bh); // Todo: is it needed?
 	brelse(bh);
 	unlock_table(sbi);
 
@@ -1398,6 +1398,7 @@ static ssize_t ddfs_write(struct file *file, const char __user *u, size_t count,
 	brelse(bh);
 	dd_print("calling unlock_data");
 	unlock_data(sbi);
+	ddfs_sync_inode(inode);
 
 	dd_print("~ddfs_write %lu", count);
 	return count;
@@ -1650,6 +1651,7 @@ static struct dentry *ddfs_lookup(struct inode *dir, struct dentry *dentry,
 		 flags);
 
 	lock_data(sbi);
+	dd_print("ddfs_lookup locked");
 
 	dump_ddfs_inode_info(DDFS_I(dir));
 
