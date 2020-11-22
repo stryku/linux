@@ -140,6 +140,36 @@ struct ddfs_sb_info {
 	const void *dir_ops; /* Opaque; default directory operations */
 };
 
+static inline void lock_table(struct ddfs_sb_info *sbi)
+{
+	mutex_lock(&sbi->table_lock);
+}
+
+static inline void unlock_table(struct ddfs_sb_info *sbi)
+{
+	mutex_unlock(&sbi->table_lock);
+}
+
+static inline void lock_data(struct ddfs_sb_info *sbi)
+{
+	mutex_lock(&sbi->s_lock);
+}
+
+static inline void unlock_data(struct ddfs_sb_info *sbi)
+{
+	mutex_unlock(&sbi->s_lock);
+}
+
+static inline void lock_inode_build(struct ddfs_sb_info *sbi)
+{
+	mutex_lock(&sbi->build_inode_lock);
+}
+
+static inline void unlock_inode_build(struct ddfs_sb_info *sbi)
+{
+	mutex_unlock(&sbi->build_inode_lock);
+}
+
 static inline struct ddfs_sb_info *DDFS_SB(struct super_block *sb)
 {
 	return sb->s_fs_info;
@@ -589,6 +619,10 @@ static int __ddfs_write_inode(struct inode *inode, int wait)
 	sector_t blocknr;
 	int offset;
 
+	dd_print("__ddfs_write_inode: inode: %p, wait: %d", inode, wait);
+	dump_ddfs_inode_info(dd_inode);
+
+	lock_data(sbi);
 retry:
 	// i_pos = ddfs_i_pos_read(sbi, inode);
 	i_pos = dd_inode->i_pos;
@@ -596,8 +630,9 @@ retry:
 		return 0;
 	}
 
-	ddfs_get_blknr_offset(sbi, i_pos, &blocknr, &offset);
-	bh = sb_bread(sb, blocknr);
+	unsigned block_on_device =
+		sbi->data_cluster_no * sbi->blocks_per_cluster;
+	bh = sb_bread(sb, block_on_device);
 	if (!bh) {
 		dd_error("unable to read inode block for updating (i_pos %lld)",
 			 i_pos);
@@ -608,6 +643,7 @@ retry:
 	// spin_lock(&sbi->inode_hash_lock);
 	if (i_pos != dd_inode->i_pos) {
 		// spin_unlock(&sbi->inode_hash_lock);
+		dd_print("retrying");
 		brelse(bh);
 		goto retry;
 	}
@@ -636,6 +672,8 @@ retry:
 		release_dir_entries(&entry_ptrs, part_flags);
 	}
 
+	unlock_data(sbi);
+
 	return 0;
 }
 
@@ -647,36 +685,6 @@ static int ddfs_write_inode(struct inode *inode, struct writeback_control *wbc)
 int ddfs_sync_inode(struct inode *inode)
 {
 	return __ddfs_write_inode(inode, 1);
-}
-
-static inline void lock_table(struct ddfs_sb_info *sbi)
-{
-	mutex_lock(&sbi->table_lock);
-}
-
-static inline void unlock_table(struct ddfs_sb_info *sbi)
-{
-	mutex_unlock(&sbi->table_lock);
-}
-
-static inline void lock_data(struct ddfs_sb_info *sbi)
-{
-	mutex_lock(&sbi->s_lock);
-}
-
-static inline void unlock_data(struct ddfs_sb_info *sbi)
-{
-	mutex_unlock(&sbi->s_lock);
-}
-
-static inline void lock_inode_build(struct ddfs_sb_info *sbi)
-{
-	mutex_lock(&sbi->build_inode_lock);
-}
-
-static inline void unlock_inode_build(struct ddfs_sb_info *sbi)
-{
-	mutex_unlock(&sbi->build_inode_lock);
 }
 
 static inline void table_write_cluster(struct ddfs_sb_info *sbi,
@@ -1257,7 +1265,7 @@ ssize_t ddfs_read(struct file *file, char __user *buf, size_t size,
 	dd_print("ddfs_read, file: %p, size: %lu, ppos: %llu", file, size,
 		 *ppos);
 
-	return 0;
+	return -1;
 }
 
 int ddfs_find_free_cluster(struct super_block *sb)
@@ -1289,6 +1297,7 @@ int ddfs_find_free_cluster(struct super_block *sb)
 	*clusters = DDFS_CLUSTER_EOF;
 
 	mark_buffer_dirty(bh);
+	sync_dirty_buffer(bh);
 	brelse(bh);
 	unlock_table(sbi);
 
@@ -1319,32 +1328,42 @@ static ssize_t ddfs_write(struct file *file, const char __user *u, size_t count,
 		dd_print("no cluster, need to search for a free one");
 		cluster_no = ddfs_find_free_cluster(inode->i_sb);
 		dd_inode->i_logstart = dd_inode->i_start = cluster_no;
+		inode_inc_iversion(inode);
 		mark_inode_dirty(inode);
 	}
 
 	dd_print("cluster_no to use: %d", cluster_no);
 
-	cluster_on_device = cluster_no + sbi->table_offset / sbi->cluster_size;
+	cluster_on_device = cluster_no + sbi->data_cluster_no;
 	block_on_device = cluster_on_device * sbi->blocks_per_cluster;
 
 	dd_print("cluster_on_device: %u", cluster_on_device);
 	dd_print("block_on_device: %u", block_on_device);
 
+	dd_print("calling lock_data");
 	lock_data(sbi);
 
 	bh = sb_bread(sb, block_on_device);
 	if (!bh) {
+		dd_print("sb_bread failed");
 		//Todo: handle
 	}
+	dd_print("sb_bread succeed");
 
 	dest = (char *)bh->b_data;
 	dest += *ppos;
 
 	dd_print("writing data to buffer");
 	memcpy(dest, u, count);
+	dd_print("writing done");
 
-	mark_buffer_dirty(bh);
+	dd_print("calling mark_buffer_dirty_inode");
+	inode_inc_iversion(inode);
+	mark_buffer_dirty_inode(bh, inode);
+
+	dd_print("calling brelse");
 	brelse(bh);
+	dd_print("calling unlock_data");
 	unlock_data(sbi);
 
 	dd_print("~ddfs_write %lu", count);
@@ -1579,10 +1598,11 @@ static struct dentry *ddfs_lookup(struct inode *dir, struct dentry *dentry,
 	int err;
 	// char dname_buf[128] = { 0 };
 
-	lock_data(sbi);
-
 	dd_print("ddfs_lookup: dir: %p, dentry: %p, flags: %u", dir, dentry,
 		 flags);
+
+	lock_data(sbi);
+
 	dump_ddfs_inode_info(DDFS_I(dir));
 
 	// dentry->d_op->d_dname(dentry, dname_buf, 128);
