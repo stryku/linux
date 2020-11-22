@@ -1263,10 +1263,34 @@ const struct inode_operations ddfs_file_inode_operations = {
 ssize_t ddfs_read(struct file *file, char __user *buf, size_t size,
 		  loff_t *ppos)
 {
+	struct inode *inode = d_inode(file->f_path.dentry);
+	struct ddfs_inode_info *dd_inode = DDFS_I(inode);
+	struct super_block *sb = inode->i_sb;
+	struct ddfs_sb_info *sbi = DDFS_SB(sb);
+	struct buffer_head *bh;
+	unsigned cluster_no = dd_inode->i_logstart;
+	unsigned block_on_device = cluster_no * sbi->blocks_per_cluster;
+	char *data_ptr;
+
 	dd_print("ddfs_read, file: %p, size: %lu, ppos: %llu", file, size,
 		 *ppos);
 
-	return -1;
+	lock_data(sbi);
+
+	bh = sb_bread(sb, block_on_device);
+	if (!bh) {
+		//todo: handle
+	}
+
+	data_ptr = (char *)bh->b_data;
+	data_ptr += *ppos;
+
+	memcpy(buf, data_ptr, size);
+
+	brelse(bh);
+	unlock_data(sbi);
+
+	return size;
 }
 
 int ddfs_find_free_cluster(struct super_block *sb)
