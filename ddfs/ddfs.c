@@ -1268,7 +1268,7 @@ ssize_t ddfs_read(struct file *file, char __user *buf, size_t size,
 	struct super_block *sb = inode->i_sb;
 	struct ddfs_sb_info *sbi = DDFS_SB(sb);
 	struct buffer_head *bh;
-	unsigned cluster_no = dd_inode->i_logstart + 3;
+	unsigned cluster_no = dd_inode->i_logstart + 4; // sb, table, root + 1
 	unsigned block_on_device = cluster_no * sbi->blocks_per_cluster;
 	char *data_ptr;
 
