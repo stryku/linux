@@ -1203,12 +1203,15 @@ int ddfs_getattr(const struct path *path, struct kstat *stat, u32 request_mask,
 {
 	struct inode *inode = d_inode(path->dentry);
 
-	dd_print("ddfs_getattr, inode: %p, request_mask: %u, flags: %u", inode,
+	dd_print("ddfs_getattr, inode: %p, request_mask: %x, flags: %u", inode,
 		 request_mask, flags);
 	dump_ddfs_inode_info(DDFS_I(inode));
 
 	generic_fillattr(inode, stat);
 	stat->blksize = DDFS_SB(inode->i_sb)->cluster_size;
+
+	dd_print("stat->mode: %x", stat->mode);
+	dd_print("S_ISDIR(stat->mode): %d", S_ISDIR(stat->mode));
 
 	dd_print("~ddfs_getattr 0");
 	return 0;
@@ -1248,8 +1251,28 @@ const struct inode_operations ddfs_file_inode_operations = {
 	.update_time = ddfs_update_time,
 };
 
+ssize_t ddfs_read(struct file *file, char __user *buf, size_t size,
+		  loff_t *ppos)
+{
+	dd_print("ddfs_read, file: %p, size: %lu, ppos: %llu", file, size,
+		 *ppos);
+
+	return 0;
+}
+
+static ssize_t ddfs_write(struct file *file, const char __user *u, size_t count,
+			  loff_t *ppos)
+{
+	dd_print("ddfs_write, file: %p, size: %lu, ppos: %llu", file, count,
+		 *ppos);
+
+		return 3;
+}
+
 const struct file_operations ddfs_file_operations = {
 	// Todo: fill
+	.read = ddfs_read,
+	.write = ddfs_write,
 	// 	.llseek = generic_file_llseek,
 	// 	.read_iter = generic_file_read_iter,
 	// 	.write_iter = generic_file_write_iter,
@@ -1267,9 +1290,9 @@ const struct file_operations ddfs_file_operations = {
 
 static const struct address_space_operations ddfs_aops = {
 	// Todo: fill
-	// .readpage = fat_readpage,
+	// .readpage = ddfs_readpage,
 	// .readpages = fat_readpages,
-	// .writepage = fat_writepage,
+	// .writepage = ddfs_writepage,
 	// .writepages = fat_writepages,
 	// .write_begin = fat_write_begin,
 	// .write_end = fat_write_end,
@@ -1808,9 +1831,163 @@ static const struct inode_operations ddfs_dir_inode_operations = {
 	.update_time = ddfs_update_time,
 };
 
+// static int __ddfs_readdir(struct inode *inode, struct file *file,
+// 			  struct dir_context *ctx, int short_only,
+// 			  struct fat_ioctl_filldir_callback *both)
+// {
+// 	struct super_block *sb = inode->i_sb;
+// 	struct msdos_sb_info *sbi = MSDOS_SB(sb);
+// 	struct buffer_head *bh;
+// 	struct msdos_dir_entry *de;
+// 	unsigned char nr_slots;
+// 	wchar_t *unicode = NULL;
+// 	unsigned char bufname[FAT_MAX_SHORT_SIZE];
+// 	int isvfat = sbi->options.isvfat;
+// 	const char *fill_name = NULL;
+// 	int fake_offset = 0;
+// 	loff_t cpos;
+// 	int short_len = 0, fill_len = 0;
+// 	int ret = 0;
+
+// 	mutex_lock(&sbi->s_lock);
+
+// 	cpos = ctx->pos;
+// 	/* Fake . and .. for the root directory. */
+// 	if (inode->i_ino == DDFS_ROOT_INO) {
+// 		if (!dir_emit_dots(file, ctx))
+// 			goto out;
+// 		if (ctx->pos == 2) {
+// 			fake_offset = 1;
+// 			cpos = 0;
+// 		}
+// 	}
+// 	if (cpos & (sizeof(struct msdos_dir_entry) - 1)) {
+// 		ret = -ENOENT;
+// 		goto out;
+// 	}
+
+// 	bh = NULL;
+// get_new:
+// 	if (fat_get_entry(inode, &cpos, &bh, &de) == -1)
+// 		goto end_of_dir;
+// parse_record:
+// 	nr_slots = 0;
+// 	/*
+// 	 * Check for long filename entry, but if short_only, we don't
+// 	 * need to parse long filename.
+// 	 */
+// 	if (isvfat && !short_only) {
+// 		if (de->name[0] == DELETED_FLAG)
+// 			goto record_end;
+// 		if (de->attr != ATTR_EXT && (de->attr & ATTR_VOLUME))
+// 			goto record_end;
+// 		if (de->attr != ATTR_EXT && IS_FREE(de->name))
+// 			goto record_end;
+// 	} else {
+// 		if ((de->attr & ATTR_VOLUME) || IS_FREE(de->name))
+// 			goto record_end;
+// 	}
+
+// 	if (isvfat && de->attr == ATTR_EXT) {
+// 		int status = fat_parse_long(inode, &cpos, &bh, &de, &unicode,
+// 					    &nr_slots);
+// 		if (status < 0) {
+// 			bh = NULL;
+// 			ret = status;
+// 			goto end_of_dir;
+// 		} else if (status == PARSE_INVALID)
+// 			goto record_end;
+// 		else if (status == PARSE_NOT_LONGNAME)
+// 			goto parse_record;
+// 		else if (status == PARSE_EOF)
+// 			goto end_of_dir;
+
+// 		if (nr_slots) {
+// 			void *longname = unicode + FAT_MAX_UNI_CHARS;
+// 			int size = PATH_MAX - FAT_MAX_UNI_SIZE;
+// 			int len = fat_uni_to_x8(sb, unicode, longname, size);
+
+// 			fill_name = longname;
+// 			fill_len = len;
+// 			/* !both && !short_only, so we don't need shortname. */
+// 			if (!both)
+// 				goto start_filldir;
+
+// 			short_len = fat_parse_short(sb, de, bufname,
+// 						    sbi->options.dotsOK);
+// 			if (short_len == 0)
+// 				goto record_end;
+// 			/* hack for fat_ioctl_filldir() */
+// 			both->longname = fill_name;
+// 			both->long_len = fill_len;
+// 			both->shortname = bufname;
+// 			both->short_len = short_len;
+// 			fill_name = NULL;
+// 			fill_len = 0;
+// 			goto start_filldir;
+// 		}
+// 	}
+
+// 	short_len = fat_parse_short(sb, de, bufname, sbi->options.dotsOK);
+// 	if (short_len == 0)
+// 		goto record_end;
+
+// 	fill_name = bufname;
+// 	fill_len = short_len;
+
+// start_filldir:
+// 	ctx->pos = cpos - (nr_slots + 1) * sizeof(struct msdos_dir_entry);
+// 	if (fake_offset && ctx->pos < 2)
+// 		ctx->pos = 2;
+
+// 	if (!memcmp(de->name, MSDOS_DOT, MSDOS_NAME)) {
+// 		if (!dir_emit_dot(file, ctx))
+// 			goto fill_failed;
+// 	} else if (!memcmp(de->name, MSDOS_DOTDOT, MSDOS_NAME)) {
+// 		if (!dir_emit_dotdot(file, ctx))
+// 			goto fill_failed;
+// 	} else {
+// 		unsigned long inum;
+// 		loff_t i_pos = fat_make_i_pos(sb, bh, de);
+// 		struct inode *tmp = fat_iget(sb, i_pos);
+// 		if (tmp) {
+// 			inum = tmp->i_ino;
+// 			iput(tmp);
+// 		} else
+// 			inum = iunique(sb, MSDOS_ROOT_INO);
+// 		if (!dir_emit(ctx, fill_name, fill_len, inum,
+// 			      (de->attr & ATTR_DIR) ? DT_DIR : DT_REG))
+// 			goto fill_failed;
+// 	}
+
+// record_end:
+// 	fake_offset = 0;
+// 	ctx->pos = cpos;
+// 	goto get_new;
+
+// end_of_dir:
+// 	if (fake_offset && cpos < 2)
+// 		ctx->pos = 2;
+// 	else
+// 		ctx->pos = cpos;
+// fill_failed:
+// 	brelse(bh);
+// 	if (unicode)
+// 		__putname(unicode);
+// out:
+// 	mutex_unlock(&sbi->s_lock);
+
+// 	return ret;
+// }
+
+// static int ddfs_readdir(struct file *file, struct dir_context *ctx)
+// {
+// 	return __ddfs_readdir(file_inode(file), file, ctx, 0, NULL);
+// }
+
 const struct file_operations ddfs_dir_operations = {
-	.llseek = generic_file_llseek,
-	.read = generic_read_dir,
+	// .llseek = generic_file_llseek,
+	// .read = generic_read_dir,
 	// .iterate_shared = fat_readdir,
 	// #ifdef CONFIG_COMPAT
 	// .compat_ioctl	= fat_compat_dir_ioctl,
@@ -1898,7 +2075,7 @@ static inline umode_t ddfs_make_mode(struct ddfs_sb_info *sbi, u8 attrs,
 {
 	if (attrs & DDFS_DIR_ATTR) {
 		// return (mode & ~sbi->options.fs_dmask) | S_IFDIR;
-		return DDFS_DEFAULT_MODE | S_IFDIR;
+		return (mode & ~S_IFMT) | S_IFDIR;
 	}
 
 	return 0;
@@ -1918,6 +2095,7 @@ static int ddfs_read_root(struct inode *inode)
 
 	inode->i_generation = 0;
 	inode->i_mode = ddfs_make_mode(sbi, DDFS_DIR_ATTR, S_IRWXUGO);
+	dd_print("root inode->i_mode: %x", inode->i_mode);
 	inode->i_op = sbi->dir_ops;
 	inode->i_fop = &ddfs_dir_operations;
 
@@ -2032,7 +2210,7 @@ static int ddfs_fill_super(struct super_block *sb, void *data, int silent)
 	}
 	dd_print("root_inode ptr: %p", root_inode);
 
-	root_inode->i_ino = 1;
+	root_inode->i_ino = DDFS_ROOT_INO;
 	dd_print("calling inode_set_iversion(root_inode, 1)");
 	inode_set_iversion(root_inode, 1);
 
