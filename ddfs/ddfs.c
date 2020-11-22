@@ -319,19 +319,19 @@ struct dir_entry_ptrs {
 
 void dump_dir_entry_ptrs(const struct dir_entry_ptrs *ptrs)
 {
-	dd_print("dump_dir_entry_ptrs: %p", ptrs);
+	dd_print("dump_dir_entry_ptrs: %px", ptrs);
 	dd_print("\t\tptrs->error: %ld", ptrs->error);
-	dd_print("\t\tptrs->name.ptr: %p", ptrs->name.ptr);
-	dd_print("\t\tptrs->name.bh: %p", ptrs->name.bh);
+	dd_print("\t\tptrs->name.ptr: %px", ptrs->name.ptr);
+	dd_print("\t\tptrs->name.bh: %px", ptrs->name.bh);
 
-	dd_print("\t\tptrs->attributes.ptr: %p", ptrs->attributes.ptr);
-	dd_print("\t\tptrs->attributes.bh: %p", ptrs->attributes.bh);
+	dd_print("\t\tptrs->attributes.ptr: %px", ptrs->attributes.ptr);
+	dd_print("\t\tptrs->attributes.bh: %px", ptrs->attributes.bh);
 
-	dd_print("\t\tptrs->size.ptr: %p", ptrs->size.ptr);
-	dd_print("\t\tptrs->size.bh: %p", ptrs->size.bh);
+	dd_print("\t\tptrs->size.ptr: %px", ptrs->size.ptr);
+	dd_print("\t\tptrs->size.bh: %px", ptrs->size.bh);
 
-	dd_print("\t\tptrs->first_cluster.ptr: %p", ptrs->first_cluster.ptr);
-	dd_print("\t\tptrs->first_cluster.bh: %p", ptrs->first_cluster.bh);
+	dd_print("\t\tptrs->first_cluster.ptr: %px", ptrs->first_cluster.ptr);
+	dd_print("\t\tptrs->first_cluster.bh: %px", ptrs->first_cluster.bh);
 }
 
 static inline struct dir_entry_ptrs
@@ -341,6 +341,7 @@ access_dir_entries(struct inode *dir, unsigned entry_index, unsigned part_flags)
 		calc_dir_entry_offsets(dir, entry_index);
 	struct super_block *sb = dir->i_sb;
 	struct dir_entry_ptrs result;
+	unsigned char *ptr;
 
 	struct buffer_head *hydra[4] = { NULL };
 	unsigned block_no[4] = { 0 };
@@ -354,16 +355,16 @@ access_dir_entries(struct inode *dir, unsigned entry_index, unsigned part_flags)
 
 	struct part_data parts_data[] = { { .flag = DDFS_PART_NAME,
 					    .offsets = &offsets.name,
-					    .dest_bh = NULL },
+					    .dest_bh = ((void *)0) },
 					  { .flag = DDFS_PART_ATTRIBUTES,
 					    .offsets = &offsets.attributes,
-					    .dest_bh = NULL },
+					    .dest_bh = ((void *)0) },
 					  { .flag = DDFS_PART_SIZE,
 					    .offsets = &offsets.size,
-					    .dest_bh = NULL },
+					    .dest_bh = ((void *)0) },
 					  { .flag = DDFS_PART_FIRST_CLUSTER,
 					    .offsets = &offsets.first_cluster,
-					    .dest_bh = NULL } };
+					    .dest_bh = ((void *)0) } };
 
 	unsigned number_of_parts = sizeof(parts_data) / sizeof(parts_data[0]);
 	int i;
@@ -371,29 +372,31 @@ access_dir_entries(struct inode *dir, unsigned entry_index, unsigned part_flags)
 	dd_print("access_dir_entries");
 
 	for (i = 0; i < number_of_parts; ++i) {
-		struct part_data *data = &(parts_data[i]);
 		int used_cached = 0;
 		int j;
 		struct buffer_head *bh;
 
-		if (!(part_flags & data->flag)) {
-			dd_print("omit flag[%d]: %u", i, data->flag);
-			data->dest_bh = NULL;
+		if (!(part_flags & parts_data[i].flag)) {
+			dd_print("omit flag[%d]: %u", i, parts_data[i].flag);
+			parts_data[i].dest_bh = ((void *)0);
+			dd_print("parts_data[%d].dest_bh = %p", i,
+				 parts_data[i].dest_bh);
 			continue;
 		}
 
-		dd_print("calculate flag[%d]: %u", i, data->flag);
+		dd_print("calculate flag[%d]: %u", i, parts_data[i].flag);
 		for (j = 0; j < counter; ++j) {
 			// char *ptr;
 
-			if (block_no[j] != data->offsets->block_on_device) {
+			if (block_no[j] !=
+			    parts_data[i].offsets->block_on_device) {
 				continue;
 			}
 
 			// The same block no as cached one. Reuse it.
 
 			used_cached = 1;
-			data->dest_bh = hydra[j];
+			parts_data[i].dest_bh = hydra[j];
 			// ptr = (char *)(hydra[j]->b_data) +
 			//       data->offsets->offset_on_block;
 			// *data->dest_ptr = ptr;
@@ -405,55 +408,58 @@ access_dir_entries(struct inode *dir, unsigned entry_index, unsigned part_flags)
 		}
 
 		// No cached bh. Need to read
-		bh = sb_bread(sb, data->offsets->block_on_device);
+		bh = sb_bread(sb, parts_data[i].offsets->block_on_device);
 		if (!bh) {
-			data->dest_bh = NULL;
+			parts_data[i].dest_bh = NULL;
 			continue;
 		}
 
 		// char *ptr =
 		// 	(char *)(bh->b_data) + data->offsets->offset_on_block;
 		// *data->dest_ptr = ptr;
-		data->dest_bh = bh;
+		parts_data[i].dest_bh = bh;
 
 		hydra[counter] = bh;
-		block_no[counter] = data->offsets->block_on_device;
+		block_no[counter] = parts_data[i].offsets->block_on_device;
 		++counter;
 	}
 
 	result.error = 0;
 
-	if (parts_data[0].dest_bh) {
+	result.name.bh = parts_data[0].dest_bh;
+	if (result.name.bh) {
 		result.name.bh = parts_data[0].dest_bh;
-		unsigned char *ptr =
-			result.name.bh->b_data + offsets.name.offset_on_block;
+		ptr = result.name.bh->b_data + offsets.name.offset_on_block;
 		result.name.ptr = (DDFS_DIR_ENTRY_NAME_TYPE *)ptr;
 	}
 
-	if (parts_data[1].dest_bh) {
+	result.attributes.bh = parts_data[1].dest_bh;
+	if (result.attributes.bh) {
 		result.attributes.bh = parts_data[1].dest_bh;
-		unsigned char *ptr = result.attributes.bh->b_data +
-				     offsets.attributes.offset_on_block;
+		ptr = result.attributes.bh->b_data +
+		      offsets.attributes.offset_on_block;
 		result.attributes.ptr = (DDFS_DIR_ENTRY_ATTRIBUTES_TYPE *)ptr;
 	}
 
-	if (parts_data[2].dest_bh) {
-		result.size.bh = parts_data[2].dest_bh;
-		unsigned char *ptr =
-			result.size.bh->b_data + offsets.size.offset_on_block;
+	result.size.bh = parts_data[2].dest_bh;
+	if (result.size.bh) {
+		ptr = result.size.bh->b_data + offsets.size.offset_on_block;
 		result.size.ptr = (DDFS_DIR_ENTRY_SIZE_TYPE *)ptr;
 	}
 
-	if (parts_data[3].dest_bh) {
-		result.first_cluster.bh = parts_data[3].dest_bh;
-		unsigned char *ptr = result.first_cluster.bh->b_data +
-				     offsets.first_cluster.offset_on_block;
+	result.first_cluster.bh = parts_data[3].dest_bh;
+	if (result.first_cluster.bh) {
+		ptr = result.first_cluster.bh->b_data +
+		      offsets.first_cluster.offset_on_block;
 		result.first_cluster.ptr =
 			(DDFS_DIR_ENTRY_FIRST_CLUSTER_TYPE *)ptr;
 	}
 
 	dd_print("access_dir_entries: dir: %p, entry_index: %d, part_flags: %u",
 		 dir, entry_index, part_flags);
+
+	dd_print("access_dir_entries dump 2");
+	dump_dir_entry_ptrs(&result);
 
 	return result;
 }
@@ -611,9 +617,6 @@ static int __ddfs_write_inode(struct inode *inode, int wait)
 	struct ddfs_sb_info *sbi = DDFS_SB(sb);
 	struct buffer_head *bh;
 	struct ddfs_inode_info *dd_inode = DDFS_I(inode);
-	loff_t i_pos;
-	sector_t blocknr;
-	int offset;
 	unsigned block_on_device;
 
 	dd_print("__ddfs_write_inode: inode: %p, wait: %d", inode, wait);
@@ -621,7 +624,6 @@ static int __ddfs_write_inode(struct inode *inode, int wait)
 
 	dd_print("locking data");
 	lock_data(sbi);
-retry:
 	// i_pos = ddfs_i_pos_read(sbi, inode);
 	// i_pos = dd_inode->i_pos;
 	// if (!i_pos) {
@@ -633,8 +635,7 @@ retry:
 	block_on_device = sbi->data_cluster_no * sbi->blocks_per_cluster;
 	bh = sb_bread(sb, block_on_device);
 	if (!bh) {
-		dd_error("unable to read inode block for updating (i_pos %lld)",
-			 i_pos);
+		dd_error("unable to read inode block for updating");
 		unlock_data(sbi);
 		dd_print("~__ddfs_write_inode error %d", -EIO);
 		return -EIO;
@@ -651,9 +652,9 @@ retry:
 		*entry_ptrs.size.ptr = inode->i_size;
 		*entry_ptrs.attributes.ptr = DDFS_FILE_ATTR;
 
-		mark_buffer_dirty(entry_ptrs.first_cluster.bh);
-		mark_buffer_dirty(entry_ptrs.size.bh);
-		mark_buffer_dirty(entry_ptrs.attributes.bh);
+		// mark_buffer_dirty(entry_ptrs.first_cluster.bh);
+		// mark_buffer_dirty(entry_ptrs.size.bh);
+		// mark_buffer_dirty(entry_ptrs.attributes.bh);
 		if (wait) {
 			// Todo: handle
 			// err = sync_dirty_buffer(bh);
@@ -1074,6 +1075,7 @@ static long ddfs_add_dir_entry(struct inode *dir, const struct qstr *qname,
 
 	dd_print("calling mark_buffer_dirty_inode");
 	mark_buffer_dirty(parts_ptrs.name.bh);
+	sync_dirty_buffer(parts_ptrs.name.bh);
 	dd_print("calling mark_inode_dirty");
 	inode_inc_iversion(dir);
 
@@ -1086,6 +1088,7 @@ static long ddfs_add_dir_entry(struct inode *dir, const struct qstr *qname,
 	*parts_ptrs.first_cluster.ptr = DDFS_CLUSTER_NOT_ASSIGNED;
 	inode_inc_iversion(dir);
 	mark_buffer_dirty(parts_ptrs.first_cluster.bh);
+	sync_dirty_buffer(parts_ptrs.name.bh);
 	mark_inode_dirty(dir);
 
 	*de = ddfs_make_dir_entry(&parts_ptrs);
@@ -1368,6 +1371,18 @@ static ssize_t ddfs_write(struct file *file, const char __user *u, size_t count,
 	return count;
 }
 
+int ddfs_file_fsync(struct file *filp, loff_t start, loff_t end, int datasync)
+{
+	struct inode *inode = filp->f_mapping->host;
+	int err;
+
+	err = __generic_file_fsync(filp, start, end, datasync);
+	if (err)
+		return err;
+
+	return blkdev_issue_flush(inode->i_sb->s_bdev, GFP_KERNEL, NULL);
+}
+
 const struct file_operations ddfs_file_operations = {
 	// Todo: fill
 	.read = ddfs_read,
@@ -1381,7 +1396,7 @@ const struct file_operations ddfs_file_operations = {
 	// #ifdef CONFIG_COMPAT
 	// 	.compat_ioctl = fat_generic_compat_ioctl,
 	// #endif
-	// 	.fsync = fat_file_fsync,
+	.fsync = ddfs_file_fsync,
 	// 	.splice_read = generic_file_splice_read,
 	// 	.splice_write = iter_file_splice_write,
 	// 	.fallocate = fat_fallocate,
@@ -1504,6 +1519,7 @@ static int ddfs_create(struct inode *dir, struct dentry *dentry, umode_t mode,
 
 	inode_inc_iversion(dir);
 	mark_inode_dirty(dir);
+	inode_inc_iversion(dir);
 
 	dd_print("calling ddfs_build_inode");
 	inode = ddfs_build_inode(sb, &de);
@@ -2096,7 +2112,7 @@ const struct file_operations ddfs_dir_operations = {
 	// #ifdef CONFIG_COMPAT
 	// .compat_ioctl	= fat_compat_dir_ioctl,
 	// #endif
-	// .fsync		= fat_file_fsync,
+	.fsync = ddfs_file_fsync
 };
 
 static int ddfs_revalidate(struct dentry *dentry, unsigned int flags)
